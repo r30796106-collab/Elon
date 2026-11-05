@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets and credentials
+.env
+.env.*
+*.key
+*secret*
+*credentials*
+
+# Runtime databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs and backups
+logs/
+backups/
+*.log
+*.bak
+*.bak.*
+*.backup_*
+
+# Generated ELON data
+workspace/
+plans/
+
+# Temporary files
+*.tmp
+*.swp
+.DS_Store
+
+# Source backup files
+*.bak
+*.bak.*
+*.backup
+*.backup_*
+*.impact.bak
+*.py.backup*
+
+# All timestamped backup variants
+*.bak*
+*.backup*
