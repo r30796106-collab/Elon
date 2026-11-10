@@ -19,6 +19,7 @@ from engine.plan_executor import PlanExecutor
 from engine.patch_approval import PatchApprovalManager
 from engine.patch_transaction import PatchTransaction
 from engine.patch_proposal_service import PatchProposalService
+from engine.aider_proposal_service import AiderProposalService
 from core.usage_tracker import UsageTracker
 from providers.gemini_provider import GeminiProvider as OpenAIProvider
 
@@ -52,6 +53,12 @@ def main():
     develop.add_argument("task_id", type=int)
     develop.add_argument("--test", default="core")
 
+    aider = sub.add_parser("aider-propose")
+    aider.add_argument("task_id", type=int)
+    aider.add_argument("--files", nargs="+", required=True)
+    aider.add_argument("--instruction", required=True)
+    aider.add_argument("--test", choices=("core", "full"), default="core")
+
     sub.add_parser("patches")
     patch_show = sub.add_parser("patch-show")
     patch_show.add_argument("proposal_id")
@@ -82,7 +89,7 @@ def main():
 
     diagnose_command = sub.add_parser("diagnose")
     diagnose_command.add_argument("--tests", action="store_true")
-    diagnose_command.add_argument("--test", choices=("core", "demo"), default="core")
+    diagnose_command.add_argument("--test", choices=("core", "demo", "full"), default="core")
 
     bridge_command = sub.add_parser("bridge")
     bridge_command.add_argument("--port", type=int, default=8765)
@@ -247,6 +254,22 @@ def main():
                 print("Status:", proposal["status"])
                 print("Files:", len(proposal["patches"]))
             print("Source changes: NOT performed")
+            if not result["success"]:
+                raise SystemExit(2)
+
+        elif args.command == "aider-propose":
+            service = AiderProposalService(engine)
+            result = service.generate_proposal(
+                args.task_id, args.files, args.instruction,
+                test_name=args.test,
+            )
+            print("AIDER:", result["message"])
+            proposal = result.get("proposal")
+            if proposal:
+                print("Proposal ID:", proposal["proposal_id"])
+                print("Status:", proposal["status"])
+                print("Files:", len(proposal["patches"]))
+            print("Original source changes: NOT performed")
             if not result["success"]:
                 raise SystemExit(2)
 

@@ -15,7 +15,33 @@ class SecurityPolicy:
 
     REGISTERED_TESTS = {
         "core": ["tests.test_core", "tests.test_self_repair"],
-        "demo": ["workspace.test_repair_demo"]
+        "demo": ["workspace.test_repair_demo"],
+        "full": [
+            "tests.test_ai_task_planner",
+            "tests.test_ai_tool_controller",
+            "tests.test_ai_tool_orchestrator",
+            "tests.test_aider_proposal_service",
+            "tests.test_autonomous_controller",
+            "tests.test_core",
+            "tests.test_error_diagnostics",
+            "tests.test_gemini_development",
+            "tests.test_health_check",
+            "tests.test_local_bridge",
+            "tests.test_package_policy",
+            "tests.test_patch_approval",
+            "tests.test_patch_process_crash",
+            "tests.test_patch_proposal_service",
+            "tests.test_patch_recovery",
+            "tests.test_patch_recovery_crash",
+            "tests.test_patch_transaction",
+            "tests.test_patch_workflow_integration",
+            "tests.test_plan_approval",
+            "tests.test_plan_executor",
+            "tests.test_project_context",
+            "tests.test_project_intelligence",
+            "tests.test_self_repair",
+            "tests.test_tool_registry",
+        ],
     }
 
     PACKAGE_MANAGERS = {
