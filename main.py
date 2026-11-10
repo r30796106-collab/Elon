@@ -5,6 +5,7 @@ from pathlib import Path
 
 from engine.task_engine import TaskEngine
 from engine.health_check import HealthChecker
+from engine.error_diagnostics import ErrorDiagnostics
 from core.ai_bridge import AIBridge
 from core.self_repair import SelfRepairEngine
 from engine.autonomous_controller import AutonomousController
@@ -79,6 +80,10 @@ def main():
     sub.add_parser("usage")
     sub.add_parser("health")
 
+    diagnose_command = sub.add_parser("diagnose")
+    diagnose_command.add_argument("--tests", action="store_true")
+    diagnose_command.add_argument("--test", choices=("core", "demo"), default="core")
+
     bridge_command = sub.add_parser("bridge")
     bridge_command.add_argument("--port", type=int, default=8765)
 
@@ -145,7 +150,43 @@ def main():
     engine = TaskEngine(ROOT)
 
     try:
-        if args.command == "bridge":
+        if args.command == "diagnose":
+            report = ErrorDiagnostics(ROOT, engine).diagnose(
+                run_tests=args.tests,
+                test_name=args.test,
+            )
+            print("ELON DIAGNOSTICS:", report["status"])
+            print("Read-only:", report["read_only"])
+            print("Automatic repair: DISABLED")
+            print("AI calls: DISABLED")
+
+            scan = report["project_scan"]
+            summary = scan["summary"]
+            print("Files scanned:", summary.get("modules_scanned", 0))
+            print("Syntax errors:", len(scan["syntax_errors"]))
+
+            for error in scan["syntax_errors"]:
+                location = error["path"]
+                if error.get("line") is not None:
+                    location += f":{error['line']}"
+                print("SYNTAX:", location, "-", error["message"])
+
+            for name, check in report["health"]["checks"].items():
+                print(f"HEALTH {name.upper()}: {check['status']} - {check['message']}")
+
+            if report["tests"] is not None:
+                print("TESTS:", "PASS" if report["tests"]["success"] else "FAIL")
+                if not report["tests"]["success"]:
+                    print((report["tests"].get("stdout") or "")[-6000:])
+                    print((report["tests"].get("stderr") or "")[-6000:])
+
+            for item in report["recommendations"]:
+                print("RECOMMENDATION:", item)
+
+            if report["status"] == "FAIL":
+                raise SystemExit(2)
+
+        elif args.command == "bridge":
             token = os.environ.get("ELON_BRIDGE_TOKEN", "")
             if len(token) < 32:
                 raise RuntimeError("ELON_BRIDGE_TOKEN must contain at least 32 characters.")

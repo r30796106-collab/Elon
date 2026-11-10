@@ -48,3 +48,5 @@ plans/
 # All timestamped backup variants
 *.bak*
 *.backup*
+.aider*
+bridge_integration_test.txt

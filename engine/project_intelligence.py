@@ -158,10 +158,21 @@ class ProjectScanner:
                                 break
 
             except (OSError, UnicodeError, SyntaxError, ValueError) as error:
-                errors.append({
-                    "path": str(path),
+                error_record = {
+                    "path": path.relative_to(self.root).as_posix(),
                     "error": type(error).__name__,
-                })
+                    "message": str(error)[:500],
+                }
+
+                if isinstance(error, SyntaxError):
+                    error_record["line"] = error.lineno
+                    error_record["column"] = error.offset
+                    error_record["source"] = (
+                        error.text.strip()[:300]
+                        if error.text else None
+                    )
+
+                errors.append(error_record)
 
         # Resolve imports after all project modules have been discovered.
         known = set(modules)

@@ -91,6 +91,18 @@ class ProjectScannerTests(unittest.TestCase):
         self.assertEqual(result["summary"]["syntax_errors"], 1)
         self.assertTrue(result["errors"])
 
+    def test_syntax_error_includes_location_and_message(self):
+        self.write("core/broken.py", "def broken(:\\n")
+
+        result = ProjectScanner(self.root).scan()
+        error = result["errors"][0]
+
+        self.assertEqual(error["path"], "core/broken.py")
+        self.assertEqual(error["error"], "SyntaxError")
+        self.assertEqual(error["line"], 1)
+        self.assertIsNotNone(error["column"])
+        self.assertTrue(error["message"])
+
     def test_scanner_does_not_execute_code(self):
         marker = self.root / "executed.txt"
         self.write(
