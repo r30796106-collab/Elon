@@ -280,29 +280,35 @@ class TaskEngine:
         }
 
     def update_task_status(self, task_id, status):
-        """Set a task status using an explicit allowlist."""
+        """Atomically update a task without reviving terminal tasks."""
         allowed = {"pending", "in_progress", "completed", "failed", "cancelled"}
         if not isinstance(status, str) or status not in allowed:
             raise ValueError("Invalid task status")
 
-        task = self.get_task(task_id)
-        if task is None:
-            raise ValueError("Task does not exist")
-
-        if task["status"] == "cancelled" and status != "cancelled":
-            raise ValueError("Cancelled task status cannot be changed")
-
-        if task["status"] == "completed" and status != "completed":
-            raise ValueError("Completed task status cannot be changed")
-
+        # Keep the terminal-state check in the UPDATE predicate itself.
+        # A read-then-write check can race when multiple workers update one
+        # task at the same time and accidentally revive a cancelled task.
         with self._connect() as db:
             cursor = db.execute(
-                "UPDATE tasks SET status = ? WHERE id = ?",
-                (status, task_id),
+                """
+                UPDATE tasks
+                SET status = ?
+                WHERE id = ?
+                  AND (
+                      status NOT IN ('completed', 'cancelled')
+                      OR status = ?
+                  )
+                """,
+                (status, task_id, status),
             )
-
-        if cursor.rowcount != 1:
-            raise ValueError("Task status update failed")
+            if cursor.rowcount != 1:
+                exists = db.execute(
+                    "SELECT 1 FROM tasks WHERE id = ?",
+                    (task_id,),
+                ).fetchone()
+                if exists is None:
+                    raise ValueError("Task does not exist")
+                raise ValueError("Terminal task status cannot be changed")
 
         self.audit.append(
             "TASK_STATUS_UPDATED",
