@@ -127,39 +127,31 @@ class JavaScriptScanner:
             }
 
         node = shutil.which("node")
-        if not node:
-            return {
-                "status": "WARN",
-                "node_available": False,
-                "files_scanned": 0,
-                "modules": {},
-                "dependencies": {},
-                "dependents": {},
-                "syntax_errors": [],
-                "skipped": skipped,
-                "read_only": True,
-                "executed_source": False,
-                "message": "JavaScript files found, but Node.js is unavailable for syntax checks.",
-            }
-
         modules = {}
         dependencies = {}
         syntax_errors = []
         warnings = []
+        if not node:
+            warnings.append(
+                "Node.js is unavailable; JavaScript syntax checks were skipped."
+            )
         known_paths = set(files)
         source_by_path = {}
         check_started = time.monotonic()
 
         for path in files:
             if (
-                time.monotonic() - check_started
+                node
+                and time.monotonic() - check_started
                 >= self.MAX_TOTAL_CHECK_SECONDS
             ):
                 warnings.append(
                     "JavaScript syntax-check time budget reached; remaining files skipped."
                 )
                 skipped.append("JavaScript syntax-check time budget reached")
-                break
+                # Continue collecting module and import information without
+                # running any more parser subprocesses.
+                node = None
 
             relative = path.relative_to(self.root).as_posix()
             try:
@@ -181,41 +173,45 @@ class JavaScriptScanner:
             }
             dependencies[module] = set()
 
-            try:
-                result = subprocess.run(
-                    [node, "--check", str(path)],
-                    cwd=str(self.root),
-                    stdin=subprocess.DEVNULL,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.CHECK_TIMEOUT_SECONDS,
-                    check=False,
-                    shell=False,
-                    env={
-                        "PATH": os.environ.get("PATH", ""),
-                        "LANG": "C.UTF-8",
-                        "LC_ALL": "C.UTF-8",
-                    },
-                )
-                if result.returncode != 0:
-                    message = (result.stderr or result.stdout or "JavaScript syntax check failed")
+            if node:
+                try:
+                    result = subprocess.run(
+                        [node, "--check", str(path)],
+                        cwd=str(self.root),
+                        stdin=subprocess.DEVNULL,
+                        capture_output=True,
+                        text=True,
+                        timeout=self.CHECK_TIMEOUT_SECONDS,
+                        check=False,
+                        shell=False,
+                        env={
+                            "PATH": os.environ.get("PATH", ""),
+                            "LANG": "C.UTF-8",
+                            "LC_ALL": "C.UTF-8",
+                        },
+                    )
+                    if result.returncode != 0:
+                        message = (
+                            result.stderr or result.stdout
+                            or "JavaScript syntax check failed"
+                        )
+                        syntax_errors.append({
+                            "path": relative,
+                            "message": message.strip()[-1000:],
+                            "language": "javascript",
+                        })
+                except subprocess.TimeoutExpired:
                     syntax_errors.append({
                         "path": relative,
-                        "message": message.strip()[-1000:],
+                        "message": "JavaScript syntax check timed out.",
                         "language": "javascript",
                     })
-            except subprocess.TimeoutExpired:
-                syntax_errors.append({
-                    "path": relative,
-                    "message": "JavaScript syntax check timed out.",
-                    "language": "javascript",
-                })
-            except OSError as error:
-                syntax_errors.append({
-                    "path": relative,
-                    "message": f"JavaScript syntax check failed: {type(error).__name__}",
-                    "language": "javascript",
-                })
+                except OSError as error:
+                    syntax_errors.append({
+                        "path": relative,
+                        "message": f"JavaScript syntax check failed: {type(error).__name__}",
+                        "language": "javascript",
+                    })
 
         path_to_module = {
             Path(metadata["path"]).as_posix(): module
@@ -262,7 +258,7 @@ class JavaScriptScanner:
                 else "WARN" if warnings
                 else "PASS"
             ),
-            "node_available": True,
+            "node_available": bool(shutil.which("node")),
             "files_scanned": len(modules),
             "modules": modules,
             "dependencies": dependencies,
