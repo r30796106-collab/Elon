@@ -155,6 +155,23 @@ class PlanApprovalManager:
         if record["status"] in ("approved", "rejected") and not reviewed_at:
             raise PlanApprovalError("Reviewed plan is missing its timestamp.")
 
+        plan_steps = plan.get("steps")
+        if not isinstance(plan_steps, list) or not plan_steps:
+            raise PlanApprovalError("Invalid saved plan steps.")
+        step_ids_list = []
+        for step in plan_steps:
+            if (
+                not isinstance(step, dict)
+                or isinstance(step.get("id"), bool)
+                or not isinstance(step.get("id"), int)
+                or step["id"] < 1
+            ):
+                raise PlanApprovalError("Invalid saved plan step identity.")
+            step_ids_list.append(step["id"])
+        if len(step_ids_list) != len(set(step_ids_list)):
+            raise PlanApprovalError("Duplicate saved plan step identity.")
+        step_ids = set(step_ids_list)
+
         execution = record.get("execution")
         if execution is not None:
             if not isinstance(execution, dict):
@@ -170,7 +187,7 @@ class PlanApprovalManager:
 
             started_at = execution.get("started_at")
             finished_at = execution.get("finished_at")
-            if not isinstance(started_at, str):
+            if not isinstance(started_at, str) or not started_at:
                 raise PlanApprovalError("Invalid execution start timestamp.")
             if finished_at is not None and not isinstance(finished_at, str):
                 raise PlanApprovalError("Invalid execution finish timestamp.")
@@ -181,15 +198,13 @@ class PlanApprovalManager:
                 raise PlanApprovalError("Claimed execution cannot be finished.")
             if (
                 execution["state"] in ("completed", "failed", "interrupted")
-                and not finished_at
+                and (
+                    not isinstance(finished_at, str)
+                    or not finished_at
+                )
             ):
                 raise PlanApprovalError("Terminal execution is missing its finish timestamp.")
 
-            step_ids = {
-                step.get("id")
-                for step in plan.get("steps", [])
-                if isinstance(step, dict)
-            }
             completed_steps = execution.get("completed_steps", [])
             if not isinstance(completed_steps, list):
                 raise PlanApprovalError("Invalid completed-step checkpoint.")
@@ -217,7 +232,11 @@ class PlanApprovalManager:
             last_completed = execution.get("last_completed_step")
             if (
                 last_completed is not None
-                and last_completed not in completed_steps
+                and (
+                    isinstance(last_completed, bool)
+                    or not isinstance(last_completed, int)
+                    or last_completed not in completed_steps
+                )
             ):
                 raise PlanApprovalError("Invalid last completed-step checkpoint.")
 
