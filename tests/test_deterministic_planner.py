@@ -1,5 +1,8 @@
+import io
 import tempfile
 import unittest
+import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from engine.deterministic_planner import DeterministicTaskPlanner
@@ -7,6 +10,7 @@ from engine.task_engine import TaskEngine
 from engine.plan_approval import PlanApprovalManager
 from engine.plan_executor import PlanExecutor
 from engine.ai_task_planner import TaskPlanError
+import main as elon_main
 
 
 class DeterministicTaskPlannerTests(unittest.TestCase):
@@ -98,6 +102,21 @@ class DeterministicTaskPlannerTests(unittest.TestCase):
             original_source,
         )
         self.assertTrue(self.engine.audit.verify())
+
+    def test_plan_cli_works_without_configured_ai_provider(self):
+        output = io.StringIO()
+        with patch.object(elon_main, "ROOT", self.root), patch.object(
+            sys,
+            "argv",
+            ["main.py", "plan", str(self.task_id)],
+        ), redirect_stdout(output):
+            elon_main.main()
+
+        self.assertIn("DETERMINISTIC PLAN SUBMITTED FOR REVIEW", output.getvalue())
+        self.assertIn("AI provider calls: DISABLED", output.getvalue())
+        records = PlanApprovalManager(self.root).list_plans()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["status"], "pending")
 
     def test_restricted_objective_is_rejected(self):
         with self.assertRaises(TaskPlanError):
