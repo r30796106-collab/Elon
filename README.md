@@ -1,5 +1,7 @@
 # ELON
 
+See [MILESTONES.md](MILESTONES.md) for the Phase 2 roadmap, current completion status, and acceptance evidence.
+
 ELON is a general-purpose developer-agent project. The V1 foundation prioritizes deterministic project inspection, task tracking, registered testing, controlled change workflows, crash recovery, and auditable operations.
 
 AI-provider integrations remain in the repository for a later, separate milestone. They are not required for the deterministic V1 diagnostic and safety workflows.
