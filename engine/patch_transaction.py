@@ -686,10 +686,10 @@ class PatchTransaction:
                         ) as file:
                             temporary = Path(file.name)
                             file.write(item["backup_data"])
+                            os.chmod(temporary, item["old_mode"])
                             file.flush()
                             os.fsync(file.fileno())
 
-                        os.chmod(temporary, item["old_mode"])
 
                         if self._hash(temporary.read_bytes()) != item["old_hash"]:
                             raise PolicyError("Recovery staging verification failed")
@@ -701,6 +701,7 @@ class PatchTransaction:
                             )
 
                         os.replace(temporary, target)
+                        self._fsync_directory(target.parent)
                         temporary = None
                         restored.append(item["path"])
 
