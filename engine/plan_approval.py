@@ -143,6 +143,96 @@ class PlanApprovalManager:
         if record.get("status") not in ("pending", "approved", "rejected"):
             raise PlanApprovalError("Invalid approval status.")
 
+        task_id = record.get("task_id")
+        if type(task_id) is not int or task_id < 1:
+            raise PlanApprovalError("Invalid plan task identity.")
+
+        reviewed_at = record.get("reviewed_at")
+        if reviewed_at is not None and not isinstance(reviewed_at, str):
+            raise PlanApprovalError("Invalid plan review timestamp.")
+        if record["status"] == "pending" and reviewed_at is not None:
+            raise PlanApprovalError("Pending plan has a review timestamp.")
+        if record["status"] in ("approved", "rejected") and not reviewed_at:
+            raise PlanApprovalError("Reviewed plan is missing its timestamp.")
+
+        execution = record.get("execution")
+        if execution is not None:
+            if not isinstance(execution, dict):
+                raise PlanApprovalError("Invalid execution record.")
+
+            if execution.get("state") not in (
+                "claimed",
+                "completed",
+                "failed",
+                "interrupted",
+            ):
+                raise PlanApprovalError("Invalid execution state.")
+
+            started_at = execution.get("started_at")
+            finished_at = execution.get("finished_at")
+            if not isinstance(started_at, str):
+                raise PlanApprovalError("Invalid execution start timestamp.")
+            if finished_at is not None and not isinstance(finished_at, str):
+                raise PlanApprovalError("Invalid execution finish timestamp.")
+            if (
+                execution["state"] == "claimed"
+                and finished_at is not None
+            ):
+                raise PlanApprovalError("Claimed execution cannot be finished.")
+            if (
+                execution["state"] in ("completed", "failed", "interrupted")
+                and not finished_at
+            ):
+                raise PlanApprovalError("Terminal execution is missing its finish timestamp.")
+
+            step_ids = {
+                step.get("id")
+                for step in plan.get("steps", [])
+                if isinstance(step, dict)
+            }
+            completed_steps = execution.get("completed_steps", [])
+            if not isinstance(completed_steps, list):
+                raise PlanApprovalError("Invalid completed-step checkpoint.")
+            if any(
+                isinstance(step_id, bool)
+                or not isinstance(step_id, int)
+                or step_id not in step_ids
+                for step_id in completed_steps
+            ):
+                raise PlanApprovalError("Invalid completed-step checkpoint.")
+            if len(completed_steps) != len(set(completed_steps)):
+                raise PlanApprovalError("Duplicate completed-step checkpoint.")
+
+            failed_step = execution.get("failed_step")
+            if (
+                failed_step is not None
+                and (
+                    isinstance(failed_step, bool)
+                    or not isinstance(failed_step, int)
+                    or failed_step not in step_ids
+                )
+            ):
+                raise PlanApprovalError("Invalid failed-step checkpoint.")
+
+            last_completed = execution.get("last_completed_step")
+            if (
+                last_completed is not None
+                and last_completed not in completed_steps
+            ):
+                raise PlanApprovalError("Invalid last completed-step checkpoint.")
+
+            checkpoint_state = execution.get("last_checkpoint_state")
+            if checkpoint_state not in (None, "completed", "failed"):
+                raise PlanApprovalError("Invalid checkpoint state.")
+            checkpoint_at = execution.get("last_checkpoint_at")
+            if checkpoint_at is not None and not isinstance(checkpoint_at, str):
+                raise PlanApprovalError("Invalid checkpoint timestamp.")
+            error_type = execution.get("last_error_type")
+            if error_type is not None and (
+                not isinstance(error_type, str) or len(error_type) > 100
+            ):
+                raise PlanApprovalError("Invalid checkpoint error type.")
+
         return record
 
     def save_plan(self, task_id, plan):
