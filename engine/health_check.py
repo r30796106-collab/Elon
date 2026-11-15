@@ -184,6 +184,17 @@ class HealthChecker:
                     )
                 }
 
+                if "patch_recovery_audit_outbox" in tables:
+                    pending_audit_events = db.execute(
+                        """SELECT COUNT(*) FROM patch_recovery_audit_outbox
+                           WHERE delivered_at IS NULL"""
+                    ).fetchone()[0]
+                    if pending_audit_events:
+                        warnings.append(
+                            f"{pending_audit_events} patch recovery audit "
+                            "outbox event(s) pending delivery."
+                        )
+
                 if not {"patch_transactions", "patch_transaction_files"}.issubset(tables):
                     return {
                         "status": "PASS",
