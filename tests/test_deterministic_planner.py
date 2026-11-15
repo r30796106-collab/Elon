@@ -147,9 +147,9 @@ class DeterministicTaskPlannerTests(unittest.TestCase):
 
         javascript = self.root / "workspace" / "calculator_app.mjs"
         javascript.write_text(
-            "export function calculateTotal(price, quantity) {\\n"
-            "    return price * quantity;\\n"
-            "}\\n",
+            "export function calculateTotal(price, quantity) {\n"
+            "    return price * quantity;\n"
+            "}\n",
             encoding="utf-8",
         )
 
