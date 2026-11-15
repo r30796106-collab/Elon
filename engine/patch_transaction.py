@@ -33,6 +33,9 @@ class PatchTransaction:
         if not path.exists():
             return False
 
+        if not self.engine.audit.verify():
+            raise PolicyError("Audit log integrity check failed")
+
         found = False
         with path.open("r", encoding="utf-8") as handle:
             for line_number, line in enumerate(handle, start=1):
