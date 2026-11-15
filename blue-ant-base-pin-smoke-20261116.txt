@@ -1,0 +1,1 @@
+Harmless Blue Ant immutable-base pin smoke test. Do not merge.
