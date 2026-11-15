@@ -152,9 +152,6 @@ class PlanApprovalManager:
             raise PlanApprovalError("Invalid plan review timestamp.")
         if record["status"] == "pending" and reviewed_at is not None:
             raise PlanApprovalError("Pending plan has a review timestamp.")
-        if record["status"] in ("approved", "rejected") and not reviewed_at:
-            raise PlanApprovalError("Reviewed plan is missing its timestamp.")
-
         plan_steps = plan.get("steps")
         if not isinstance(plan_steps, list) or not plan_steps:
             raise PlanApprovalError("Invalid saved plan steps.")
