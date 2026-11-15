@@ -268,6 +268,49 @@ class TestPlanExecutor(unittest.TestCase):
         )
         self.assertTrue(self.engine.audit.verify())
 
+    def test_finished_audit_event_retries_without_replaying_steps(self):
+        record = self.save_approved()
+        original_append = self.engine.audit.append
+        failed = {"value": False}
+
+        def fail_finished_once(event, details):
+            if event == "PLAN_EXECUTION_FINISHED" and not failed["value"]:
+                failed["value"] = True
+                raise OSError("simulated finalization audit failure")
+            return original_append(event, details)
+
+        with patch.object(
+            self.engine.audit,
+            "append",
+            side_effect=fail_finished_once,
+        ), patch.object(
+            self.executor,
+            "_execute_step",
+            wraps=self.executor._execute_step,
+        ) as execute_step:
+            with self.assertRaises(OSError):
+                self.executor.execute(record["plan_id"])
+
+            self.assertEqual(execute_step.call_count, 1)
+            self.assertEqual(
+                self.engine.get_task(self.task_id)["status"],
+                "completed",
+            )
+
+            with self.assertRaises(PlanExecutionError):
+                self.executor.execute(record["plan_id"])
+
+            self.assertEqual(execute_step.call_count, 1)
+
+        audit_text = (self.root / "logs" / "audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(
+            audit_text.count("PLAN_EXECUTION_FINISHED"),
+            1,
+        )
+        self.assertTrue(self.engine.audit.verify())
+
     def test_inactive_task_cannot_execute_approved_plan(self):
         for status in ("completed", "cancelled", "failed"):
             with self.subTest(status=status):
