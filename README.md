@@ -7,6 +7,7 @@ AI-provider integrations remain in the repository for a later, separate mileston
 ## V1 capabilities
 
 - Scan Python project modules and report syntax errors without executing scanned source files.
+- Scan JavaScript modules, map local imports, and check syntax with Node.js parsing only; scanned source is never executed.
 - Build project context and inspect approved workspace files through a registered tool interface.
 - Run only explicitly registered test suites.
 - Track development tasks and their lifecycle.
@@ -50,6 +51,8 @@ python main.py tools list
 ```
 
 The `plan` command builds a deterministic, read-only inspection/analysis/test plan and submits it for explicit review. It does not call Gemini or another AI provider. Plan execution still requires approval and never modifies source files.
+
+The `diagnose` command also checks JavaScript syntax when Node.js is available. It uses `node --check` only and never runs the scanned JavaScript source. If Node.js is unavailable while JavaScript files are present, the report warns and skips JavaScript syntax checks.
 
 The `health` command is read-only. It checks required directories, SQLite integrity, the audit hash chain, and patch/proposal consistency. It does not perform recovery or call AI providers.
 
