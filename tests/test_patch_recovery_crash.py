@@ -15,6 +15,157 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class RecoveryProcessCrashTests(unittest.TestCase):
 
+    def _create_interrupted_case(self, root):
+        engine = TaskEngine(root)
+        transaction = PatchTransaction(engine)
+        target = engine.workspace / "a.py"
+        old_data = b"value = 10\\n"
+        new_data = b"value = 100\\n"
+        target.write_bytes(new_data)
+        task_id = engine.create_task("Recovery audit outbox crash test")
+        transaction_id = uuid.uuid4().hex
+        backup_name = "recovery_audit_outbox.bak"
+        (engine.backups / backup_name).write_bytes(old_data)
+
+        with engine._connect() as db:
+            db.execute(
+                """INSERT INTO patch_transactions
+                   (transaction_id, task_id, proposal_id, status,
+                    repair_counted, created_at, updated_at, error)
+                   VALUES (?, ?, NULL, 'applying', 0, 'now', 'now', NULL)""",
+                (transaction_id, task_id),
+            )
+            db.execute(
+                """INSERT INTO patch_transaction_files
+                   (transaction_id, ordinal, path, backup,
+                    old_sha256, new_sha256, old_mode, state)
+                   VALUES (?, 0, 'a.py', ?, ?, ?, ?, 'replaced')""",
+                (
+                    transaction_id,
+                    backup_name,
+                    transaction._hash(old_data),
+                    transaction._hash(new_data),
+                    target.stat().st_mode,
+                ),
+            )
+
+        return engine, target, old_data, task_id, transaction_id
+
+    def _run_recovery_crash_child(self, root, transaction_id, exit_code, after_append):
+        script = r'''
+import os
+import sys
+from pathlib import Path
+from engine.task_engine import TaskEngine
+from engine.patch_transaction import PatchTransaction
+
+engine = TaskEngine(Path(sys.argv[1]))
+transaction = PatchTransaction(engine)
+transaction_id = sys.argv[2]
+exit_code = int(sys.argv[3])
+after_append = sys.argv[4] == "1"
+original_append = engine.audit.append
+
+def crash_at_audit_boundary(event, details):
+    if event == "PATCH_TRANSACTION_RECOVERED":
+        if after_append:
+            original_append(event, details)
+        os._exit(exit_code)
+    return original_append(event, details)
+
+engine.audit.append = crash_at_audit_boundary
+transaction.recover(transaction_id, confirm_stopped=True)
+'''
+        env = os.environ.copy()
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = (
+            str(PROJECT_ROOT)
+            + (os.pathsep + existing_pythonpath if existing_pythonpath else "")
+        )
+        return subprocess.run(
+            [
+                sys.executable, "-c", script, str(root), transaction_id,
+                str(exit_code), "1" if after_append else "0",
+            ],
+            cwd=PROJECT_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    def _assert_one_recovery_audit_event(self, engine, transaction_id):
+        records = [
+            __import__("json").loads(line)
+            for line in (engine.logs / "audit.jsonl").read_text().splitlines()
+        ]
+        matching = [
+            record for record in records
+            if record.get("event") == "PATCH_TRANSACTION_RECOVERED"
+            and record.get("details", {}).get("transaction_id") == transaction_id
+        ]
+        self.assertEqual(len(matching), 1)
+        with engine._connect() as db:
+            delivered_at = db.execute(
+                """SELECT delivered_at FROM patch_recovery_audit_outbox
+                   WHERE transaction_id = ?""",
+                (transaction_id,),
+            ).fetchone()[0]
+        self.assertIsNotNone(delivered_at)
+        self.assertTrue(engine.audit.verify())
+
+    def test_restart_after_crash_before_recovery_audit_append(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            engine, target, old_data, task_id, transaction_id = (
+                self._create_interrupted_case(root)
+            )
+            result = self._run_recovery_crash_child(
+                root, transaction_id, 79, after_append=False
+            )
+            self.assertEqual(result.returncode, 79, result.stderr)
+            self.assertEqual(target.read_bytes(), old_data)
+
+            restarted_engine = TaskEngine(root)
+            PatchTransaction(restarted_engine)
+            with restarted_engine._connect() as db:
+                status = db.execute(
+                    "SELECT status FROM patch_transactions WHERE transaction_id = ?",
+                    (transaction_id,),
+                ).fetchone()[0]
+            self.assertEqual(status, "rolled_back")
+            self.assertEqual(
+                restarted_engine.get_task(task_id)["repair_attempts"], 0
+            )
+            self._assert_one_recovery_audit_event(
+                restarted_engine, transaction_id
+            )
+
+            # A later restart must not append the same event again.
+            PatchTransaction(TaskEngine(root))
+            self._assert_one_recovery_audit_event(
+                restarted_engine, transaction_id
+            )
+
+    def test_restart_after_audit_append_before_outbox_ack(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            engine, target, old_data, _task_id, transaction_id = (
+                self._create_interrupted_case(root)
+            )
+            result = self._run_recovery_crash_child(
+                root, transaction_id, 80, after_append=True
+            )
+            self.assertEqual(result.returncode, 80, result.stderr)
+            self.assertEqual(target.read_bytes(), old_data)
+
+            restarted_engine = TaskEngine(root)
+            PatchTransaction(restarted_engine)
+            self._assert_one_recovery_audit_event(
+                restarted_engine, transaction_id
+            )
+
+
     def test_restart_after_crash_during_recovery(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
