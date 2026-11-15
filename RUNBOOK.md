@@ -101,6 +101,12 @@ Patch proposals are separate from read-only plans. A multi-file proposal can be 
 }
 ```
 
+Calculate the expected hashes before preparing the JSON:
+
+```bash
+sha256sum workspace/app.py workspace/helpers.py
+```
+
 Submit it as a pending proposal; this does not change source files:
 
 ```bash
