@@ -197,12 +197,12 @@ class HealthChecker:
 
                 if not {"patch_transactions", "patch_transaction_files"}.issubset(tables):
                     return {
-                        "status": "PASS",
+                        "status": "WARN" if warnings else "PASS",
                         "message": (
                             "Cross-store checks skipped: minimal transaction schema; "
                             "database integrity and unfinished-transaction checks remain active."
                         ),
-                        "warnings": [],
+                        "warnings": warnings,
                         "critical_issues": [],
                         "read_only": True,
                     }
@@ -217,12 +217,12 @@ class HealthChecker:
                     "transaction_id", "task_id", "proposal_id", "status"
                 }.issubset(columns):
                     return {
-                        "status": "PASS",
+                        "status": "WARN" if warnings else "PASS",
                         "message": (
                             "Cross-store checks skipped: transaction schema "
                             "does not contain all diagnostic fields."
                         ),
-                        "warnings": [],
+                        "warnings": warnings,
                         "critical_issues": [],
                         "read_only": True,
                     }
