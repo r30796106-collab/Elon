@@ -184,6 +184,18 @@ class HealthChecker:
                     )
                 }
 
+                for outbox_name in (
+                    "task_status_audit_outbox",
+                    "task_lifecycle_audit_outbox",
+                ):
+                    if outbox_name in tables:
+                        pending_count = db.execute(
+                            f"SELECT COUNT(*) FROM {outbox_name} WHERE delivered_at IS NULL"
+                        ).fetchone()[0]
+                        if pending_count:
+                            warnings.append(
+                                f"{pending_count} {outbox_name} event(s) pending delivery."
+                            )
                 if "patch_recovery_audit_outbox" in tables:
                     pending_audit_events = db.execute(
                         """SELECT COUNT(*) FROM patch_recovery_audit_outbox
