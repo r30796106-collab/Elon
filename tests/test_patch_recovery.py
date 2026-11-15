@@ -100,6 +100,49 @@ class PatchRecoveryTests(unittest.TestCase):
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), self.old_a)
 
+    def test_directory_sync_failure_after_replace_rolls_back_file(self):
+        patch_data = {
+            "path": "a.py",
+            "content": "value = 101\\n",
+            "expected_sha256": self.digest(self.old_a),
+        }
+        original_sync = self.transaction._fsync_directory
+        failed = {"value": False}
+
+        def fail_target_directory_once(directory):
+            if (
+                Path(directory) == self.a.parent
+                and not failed["value"]
+            ):
+                failed["value"] = True
+                raise OSError("simulated target directory sync failure")
+            return original_sync(directory)
+
+        from unittest.mock import patch as mock_patch
+        with mock_patch.object(
+            self.transaction,
+            "_fsync_directory",
+            side_effect=fail_target_directory_once,
+        ):
+            with self.assertRaisesRegex(
+                OSError,
+                "target directory sync failure",
+            ):
+                self.transaction.apply(self.task_id, [patch_data])
+
+        self.assertTrue(failed["value"])
+        self.assertEqual(self.a.read_bytes(), self.old_a)
+        with self.engine._connect() as db:
+            status = db.execute(
+                "SELECT status FROM patch_transactions"
+            ).fetchone()[0]
+        self.assertEqual(status, "rolled_back")
+        self.assertEqual(
+            self.engine.get_task(self.task_id)["repair_attempts"],
+            0,
+        )
+        self.assertTrue(self.engine.audit.verify())
+
     def test_confirmation_required(self):
         self.create_interrupted()
 
