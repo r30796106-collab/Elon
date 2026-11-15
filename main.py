@@ -21,6 +21,7 @@ from engine.git_manager import GitManager
 from engine.environment_inspector import EnvironmentInspector
 from engine.performance_profiler import PerformanceProfiler
 from engine.project_scaffolder import ProjectScaffolder
+from engine.worker_coordinator import WorkerCoordinator
 from engine.patch_approval import PatchApprovalManager
 from engine.patch_transaction import PatchTransaction
 from engine.patch_proposal_service import PatchProposalService
@@ -125,6 +126,22 @@ def main():
     scaffold_recover = sub.add_parser("scaffold-recover")
     scaffold_recover.add_argument("proposal_id")
     scaffold_recover.add_argument("--confirm-stopped", action="store_true")
+    sub.add_parser("worker-queue")
+    worker_claim = sub.add_parser("worker-claim")
+    worker_claim.add_argument("worker_id")
+    worker_claim.add_argument("--lease-seconds", type=int, default=300)
+    worker_heartbeat = sub.add_parser("worker-heartbeat")
+    worker_heartbeat.add_argument("task_id", type=int)
+    worker_heartbeat.add_argument("worker_id")
+    worker_heartbeat.add_argument("lease_token")
+    worker_heartbeat.add_argument("--lease-seconds", type=int, default=300)
+    worker_release = sub.add_parser("worker-release")
+    worker_release.add_argument("task_id", type=int)
+    worker_release.add_argument("worker_id")
+    worker_release.add_argument("lease_token")
+    worker_recover = sub.add_parser("worker-recover")
+    worker_recover.add_argument("task_id", type=int)
+    worker_recover.add_argument("--confirm-stopped", action="store_true")
     sub.add_parser("health")
 
     diagnose_command = sub.add_parser("diagnose")
@@ -681,6 +698,40 @@ def main():
             print("Replay: BLOCKED (lock retained)")
             print("Automatic resume: DISABLED")
 
+        elif args.command == "worker-queue":
+            coordinator = WorkerCoordinator(ROOT)
+            print(json.dumps(coordinator.list_leases(), ensure_ascii=False, indent=2))
+            print("Plan execution: NOT started by worker coordination.")
+
+        elif args.command == "worker-claim":
+            coordinator = WorkerCoordinator(ROOT)
+            claim = coordinator.claim_next(args.worker_id, args.lease_seconds)
+            if claim is None:
+                print("NO UNCLAIMED PENDING TASK")
+            else:
+                print("WORKER LEASE CLAIMED; PLAN EXECUTION: NOT STARTED")
+                print(json.dumps(claim, ensure_ascii=False, indent=2))
+
+        elif args.command == "worker-heartbeat":
+            coordinator = WorkerCoordinator(ROOT)
+            result = coordinator.heartbeat(
+                args.task_id, args.worker_id, args.lease_token, args.lease_seconds
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+
+        elif args.command == "worker-release":
+            coordinator = WorkerCoordinator(ROOT)
+            result = coordinator.release(
+                args.task_id, args.worker_id, args.lease_token
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+
+        elif args.command == "worker-recover":
+            coordinator = WorkerCoordinator(ROOT)
+            result = coordinator.recover_expired(
+                args.task_id, confirm_stopped=args.confirm_stopped
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
         elif args.command == "git":
             manager = GitManager(ROOT)
             if args.git_action == "status":
