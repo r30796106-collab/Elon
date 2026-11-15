@@ -79,6 +79,7 @@ class ProjectScanner:
         errors = []
         skipped = []
         dependencies = {}
+        imports_by_module = {}
 
         for path in files:
             if len(modules) >= self.MAX_FILES:
@@ -109,6 +110,7 @@ class ProjectScanner:
                 }
 
                 dependencies[module] = set()
+                imports_by_module[module] = []
 
                 for node in ast.walk(tree):
                     imported = []
@@ -117,6 +119,8 @@ class ProjectScanner:
                         imported.extend(alias.name for alias in node.names)
 
                     elif isinstance(node, ast.ImportFrom):
+                        base = node.module or ""
+
                         if node.level:
                             package = module.split(".")[:-1]
                             if path.name == "__init__.py":
@@ -126,22 +130,14 @@ class ProjectScanner:
                             if remove:
                                 package = package[:-remove]
 
-                            base = ".".join(package)
+                            prefix = ".".join(package)
+                            base = (
+                                f"{prefix}.{base}"
+                                if prefix and base else prefix or base
+                            )
 
-                            if node.module:
-                                base = (
-                                    f"{base}.{node.module}"
-                                    if base else node.module
-                                )
-
-                            if base:
-                                imported.append(base)
-                        elif node.module:
-                            imported.append(node.module)
-
-                        base = base if node.level else (
-                            node.module or ""
-                        )
+                        if base:
+                            imported.append(base)
 
                         for alias in node.names:
                             if alias.name != "*":
@@ -150,12 +146,7 @@ class ProjectScanner:
                                     if base else alias.name
                                 )
 
-                    for name in imported:
-                        for candidate in self._candidate_modules(name):
-                            if candidate in modules or candidate == module:
-                                if candidate != module:
-                                    dependencies[module].add(candidate)
-                                break
+                    imports_by_module[module].extend(imported)
 
             except (OSError, UnicodeError, SyntaxError, ValueError) as error:
                 error_record = {
@@ -174,58 +165,18 @@ class ProjectScanner:
 
                 errors.append(error_record)
 
-        # Resolve imports after all project modules have been discovered.
+        # Resolve stored import names after all project modules are known.
         known = set(modules)
-        resolved_dependencies = {}
+        resolved_dependencies = {
+            module: set() for module in modules
+        }
 
-        for module in modules:
-            resolved_dependencies[module] = set()
-
-        for module in modules:
-            path = self.root / modules[module]["path"]
-
-            try:
-                tree = ast.parse(path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, SyntaxError):
-                continue
-
-            for node in ast.walk(tree):
-                names = []
-
-                if isinstance(node, ast.Import):
-                    names.extend(a.name for a in node.names)
-
-                elif isinstance(node, ast.ImportFrom):
-                    base = node.module or ""
-
-                    if node.level:
-                        package = module.split(".")[:-1]
-                        if path.name == "__init__.py":
-                            package = module.split(".")
-
-                        remove = node.level - 1
-                        if remove:
-                            package = package[:-remove]
-
-                        prefix = ".".join(package)
-                        base = f"{prefix}.{base}" if prefix and base else (
-                            prefix or base
-                        )
-
-                    if base:
-                        names.append(base)
-
-                    for alias in node.names:
-                        if alias.name != "*":
-                            names.append(
-                                f"{base}.{alias.name}" if base else alias.name
-                            )
-
-                for name in names:
-                    for candidate in self._candidate_modules(name):
-                        if candidate in known and candidate != module:
-                            resolved_dependencies[module].add(candidate)
-                            break
+        for module, names in imports_by_module.items():
+            for name in names:
+                for candidate in self._candidate_modules(name):
+                    if candidate in known and candidate != module:
+                        resolved_dependencies[module].add(candidate)
+                        break
 
         dependencies = {
             name: sorted(items)
