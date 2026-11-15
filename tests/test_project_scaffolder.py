@@ -137,6 +137,68 @@ class ProjectScaffolderTests(unittest.TestCase):
         self.assertTrue((target / "main.py").is_file())
         self.assertTrue(self.scaffolder.audit.verify())
 
+    def test_workspace_symlink_is_rejected(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        (self.root / "workspace").symlink_to(
+            outside,
+            target_is_directory=True,
+        )
+
+        with self.assertRaisesRegex(ScaffoldingError, "Workspace"):
+            self.propose()
+
+    def test_generated_root_symlink_is_rejected(self):
+        workspace = self.root / "workspace"
+        workspace.mkdir()
+        outside = self.root / "outside"
+        outside.mkdir()
+        (workspace / "generated_projects").symlink_to(
+            outside,
+            target_is_directory=True,
+        )
+
+        with self.assertRaisesRegex(ScaffoldingError, "symlinks"):
+            self.propose()
+
+    def test_tampered_proposal_content_is_rejected_before_approval(self):
+        record = self.propose()
+        path = self.scaffolder._proposal_path(record["proposal_id"])
+        saved = self.scaffolder._load(record["proposal_id"])
+        saved["files"][0]["content"] += "tampered"
+        self.scaffolder._write_record(path, saved)
+
+        with self.assertRaisesRegex(ScaffoldingError, "hash or size"):
+            self.scaffolder.approve(record["proposal_id"])
+
+    def test_recovery_rejects_unexpected_files(self):
+        record = self.propose()
+        self.scaffolder.approve(record["proposal_id"])
+        original_write = self.scaffolder._write_new_file
+        calls = {"count": 0}
+
+        def fail_second(target, relative, data):
+            calls["count"] += 1
+            if calls["count"] == 2:
+                raise OSError("simulated interruption")
+            return original_write(target, relative, data)
+
+        with patch.object(
+            self.scaffolder,
+            "_write_new_file",
+            side_effect=fail_second,
+        ):
+            with self.assertRaises(OSError):
+                self.scaffolder.apply(record["proposal_id"])
+
+        target = self.root / "workspace" / "generated_projects" / "sample_app"
+        (target / "unexpected.txt").write_text("not part of proposal")
+        with self.assertRaisesRegex(ScaffoldingError, "Unexpected file"):
+            self.scaffolder.recover(
+                record["proposal_id"],
+                confirm_stopped=True,
+            )
+
     def test_recovery_requires_stopped_process_confirmation(self):
         record = self.propose()
         self.scaffolder.approve(record["proposal_id"])
