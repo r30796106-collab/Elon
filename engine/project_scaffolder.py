@@ -169,6 +169,11 @@ class ProjectScaffolder:
         if not isinstance(requirements, str) or len(requirements) > 5000:
             raise ScaffoldingError("Requirements must be text up to 5000 characters.")
 
+        if self.workspace.is_symlink():
+            raise ScaffoldingError("Workspace must not be a symlink.")
+        self.workspace.mkdir(parents=True, exist_ok=True)
+        if self.proposals.is_symlink() or self.generated.is_symlink():
+            raise ScaffoldingError("Scaffold metadata/destination paths must not be symlinks.")
         target = self.generated / project_name
         if target.exists() or target.is_symlink():
             raise ScaffoldingError("Generated project destination already exists.")
@@ -228,20 +233,36 @@ class ProjectScaffolder:
         return record
 
     def _write_record(self, path, record):
+        if path.is_symlink():
+            raise ScaffoldingError("Scaffold metadata path must not be a symlink.")
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_name(path.name + ".tmp")
+        temporary = path.with_name(
+            path.name + ".tmp." + uuid.uuid4().hex
+        )
         payload = json.dumps(
             record,
             ensure_ascii=False,
             sort_keys=True,
             indent=2,
         ).encode("utf-8")
-        with temporary.open("wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-        self._fsync_directory(path.parent)
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            self._fsync_directory(path.parent)
+        except Exception:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
 
     @staticmethod
     def _fsync_directory(path):
@@ -289,8 +310,16 @@ class ProjectScaffolder:
 
     def _load(self, proposal_id):
         path = self._proposal_path(proposal_id)
+        if self.workspace.is_symlink() or self.proposals.is_symlink():
+            raise ScaffoldingError("Scaffold proposal path contains a symlink.")
         if path.is_symlink() or not path.is_file():
             raise ScaffoldingError("Scaffold proposal was not found.")
+        try:
+            path.resolve(strict=True).relative_to(
+                self.proposals.resolve(strict=True)
+            )
+        except (OSError, ValueError):
+            raise ScaffoldingError("Scaffold proposal escaped its storage directory.") from None
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError):
@@ -335,6 +364,8 @@ class ProjectScaffolder:
             return record
         if record["status"] != "pending":
             raise ScaffoldingError("Only pending scaffold proposals can be approved.")
+        self._validate_record_files(record)
+        self._target_path(record)
 
         self._audit("PROJECT_SCAFFOLD_APPROVED", {
             "proposal_id": proposal_id,
@@ -420,22 +451,47 @@ class ProjectScaffolder:
         self._fsync_directory(path.parent)
         return True
 
-    def apply(self, proposal_id):
-        record = self._load(proposal_id)
-        if record["status"] == "pending":
-            raise ScaffoldingError("Scaffold proposal requires explicit approval.")
-        if record["status"] == "applied":
-            return record
-        if record["status"] not in ("approved", "applying", "recovery_required"):
-            raise ScaffoldingError("Scaffold proposal cannot be applied.")
-
+    def _apply_record(self, record, recovery=False):
+        proposal_id = record["proposal_id"]
         expected = self._validate_record_files(record)
         target = self._target_path(record)
-        target.mkdir(parents=True, exist_ok=True)
-        record["status"] = "applying"
-        self._write_record(self._proposal_path(proposal_id), record)
+
+        if not recovery:
+            if record["status"] != "approved":
+                raise ScaffoldingError("Scaffold proposal requires explicit approval.")
+            if target.exists() or target.is_symlink():
+                raise ScaffoldingError("Generated project destination already exists.")
+            record["status"] = "applying"
+            self._write_record(self._proposal_path(proposal_id), record)
+            target.mkdir(parents=False, exist_ok=False)
+        else:
+            if record["status"] not in ("applying", "recovery_required"):
+                raise ScaffoldingError("Scaffold proposal is not recoverable.")
+            target.mkdir(parents=False, exist_ok=True)
 
         try:
+            expected_paths = set(expected)
+            for current, directories, filenames in os.walk(
+                target,
+                topdown=True,
+                followlinks=False,
+            ):
+                current_path = Path(current)
+                for directory in directories:
+                    if (current_path / directory).is_symlink():
+                        raise ScaffoldingError("Generated project contains a symlink.")
+                for filename in filenames:
+                    existing = current_path / filename
+                    if existing.is_symlink():
+                        raise ScaffoldingError("Generated project contains a symlink.")
+                    relative = existing.relative_to(target).as_posix()
+                    if relative == ".elon-scaffold.json":
+                        continue
+                    if relative not in expected_paths:
+                        raise ScaffoldingError(
+                            f"Unexpected file in generated project: {relative}"
+                        )
+
             for relative, data in expected.items():
                 self._write_new_file(target, relative, data)
 
@@ -484,7 +540,17 @@ class ProjectScaffolder:
             self._write_record(self._proposal_path(proposal_id), record)
             raise
 
-    def recover(self, proposal_id):
+    def apply(self, proposal_id):
+        record = self._load(proposal_id)
+        if record["status"] == "applied":
+            return record
+        return self._apply_record(record, recovery=False)
+
+    def recover(self, proposal_id, confirm_stopped=False):
+        if confirm_stopped is not True:
+            raise ScaffoldingError(
+                "Recovery requires confirmation that the original process stopped."
+            )
         record = self._load(proposal_id)
         if record["status"] == "applied":
             return record
@@ -492,7 +558,7 @@ class ProjectScaffolder:
             raise ScaffoldingError(
                 "Only an interrupted scaffold application can be recovered."
             )
-        recovered = self.apply(proposal_id)
+        recovered = self._apply_record(record, recovery=True)
         self._audit("PROJECT_SCAFFOLD_RECOVERED", {
             "proposal_id": proposal_id,
             "project_name": recovered["project_name"],
