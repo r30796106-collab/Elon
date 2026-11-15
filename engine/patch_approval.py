@@ -127,14 +127,21 @@ class PatchApprovalManager:
 
         fd = None
         try:
-            fd = os.open(lock_path, flags, 0o600)
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
-                raise PatchApprovalError("Proposal lock is not a regular file")
+            try:
+                fd = os.open(lock_path, flags, 0o600)
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise PatchApprovalError(
+                        "Proposal lock is not a regular file"
+                    )
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            except OSError as error:
+                raise PatchApprovalError(
+                    "Could not safely lock proposal"
+                ) from error
 
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            # Exceptions from the protected operation must retain their
+            # original type; only lock acquisition errors are translated.
             yield
-        except OSError as error:
-            raise PatchApprovalError("Could not safely lock proposal") from error
         finally:
             if fd is not None:
                 try:
