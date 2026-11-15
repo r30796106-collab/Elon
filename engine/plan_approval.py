@@ -228,6 +228,51 @@ class PlanApprovalManager:
 
         return found
 
+    def _completed_steps_from_audit(self, plan_id):
+        path = self.audit.path
+        if not path.exists():
+            return []
+        if not self.audit.verify():
+            raise PlanApprovalError("Audit log integrity check failed")
+
+        completed = []
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line_number, line in enumerate(handle, start=1):
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        raise PlanApprovalError(
+                            f"Audit log is unreadable at line {line_number}"
+                        ) from None
+
+                    if not isinstance(event, dict):
+                        raise PlanApprovalError(
+                            f"Audit record {line_number} is invalid"
+                        )
+                    details = event.get("details")
+                    if (
+                        event.get("event") != "PLAN_STEP_COMPLETED"
+                        or not isinstance(details, dict)
+                        or details.get("plan_id") != plan_id
+                    ):
+                        continue
+
+                    step_id = details.get("step_id")
+                    if (
+                        isinstance(step_id, int)
+                        and not isinstance(step_id, bool)
+                        and step_id > 0
+                        and step_id not in completed
+                    ):
+                        completed.append(step_id)
+        except OSError as error:
+            raise PlanApprovalError(
+                f"Audit log could not be read: {error}"
+            ) from None
+
+        return completed
+
     def mark_interrupted(self, plan_id, confirm_stopped=False):
         if confirm_stopped is not True:
             raise PlanApprovalError(
@@ -300,6 +345,17 @@ class PlanApprovalManager:
         interrupted_execution = (
             dict(execution) if isinstance(execution, dict) else {}
         )
+        completed_steps = interrupted_execution.get("completed_steps", [])
+        if not isinstance(completed_steps, list):
+            completed_steps = []
+        for step_id in self._completed_steps_from_audit(plan_id):
+            if step_id not in completed_steps:
+                completed_steps.append(step_id)
+        interrupted_execution["completed_steps"] = completed_steps
+        if completed_steps:
+            interrupted_execution["last_completed_step"] = completed_steps[-1]
+            interrupted_execution["last_checkpoint_state"] = "completed"
+
         interrupted_execution.update({
             "state": "interrupted",
             "started_at": started_at,
