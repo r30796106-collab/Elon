@@ -16,6 +16,7 @@ AI-provider integrations remain in the repository for a later, separate mileston
 - Run only explicitly registered test suites.
 - Track development tasks and their lifecycle.
 - Inspect Git branch, working-tree changes, diffs, and recent commits without modifying the repository.
+- Accept manually authored multi-file JSON patch proposals without an AI provider; apply only after explicit approval.
 - Inspect Python/Node runtimes and declared dependencies without installing packages or using the network.
 - Measure read-only project scan, JavaScript scan, health-check, and context-build performance baselines.
 - Generate bounded, deterministic read-only plans without an external AI provider.
