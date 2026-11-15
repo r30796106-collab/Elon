@@ -89,6 +89,10 @@ class PatchTransaction:
                         details,
                     )
 
+                # Do not acknowledge the outbox until the audit bytes and
+                # containing directory entry have been synced to storage.
+                self._fsync_audit_log()
+
                 cursor = db.execute(
                     """UPDATE patch_recovery_audit_outbox
                        SET delivered_at = ?
@@ -117,6 +121,12 @@ class PatchTransaction:
     @staticmethod
     def _now():
         return datetime.now(timezone.utc).isoformat()
+
+    def _fsync_audit_log(self):
+        path = self.engine.audit.path
+        with path.open("rb") as handle:
+            os.fsync(handle.fileno())
+        self._fsync_directory(path.parent)
 
     @staticmethod
     def _fsync_directory(directory):
