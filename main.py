@@ -176,7 +176,20 @@ def main():
                 location = error["path"]
                 if error.get("line") is not None:
                     location += f":{error['line']}"
-                print("SYNTAX:", location, "-", error["message"])
+                print("PYTHON SYNTAX:", location, "-", error["message"])
+
+            javascript = scan["javascript"]
+            print(
+                "JavaScript files scanned:",
+                javascript.get("files_scanned", 0),
+            )
+            for error in scan["javascript_syntax_errors"]:
+                print(
+                    "JAVASCRIPT SYNTAX:",
+                    error.get("path", "unknown"),
+                    "-",
+                    error.get("message", "unknown error"),
+                )
 
             for name, check in report["health"]["checks"].items():
                 print(f"HEALTH {name.upper()}: {check['status']} - {check['message']}")
