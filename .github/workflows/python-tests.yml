@@ -25,3 +25,5 @@ jobs:
         run: python -m compileall -q .
       - name: Run full unittest suite
         run: python -m unittest discover -s tests -v
+      - name: Benchmark read-only project workflows
+        run: python main.py benchmark --iterations 3
