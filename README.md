@@ -11,7 +11,7 @@ AI-provider integrations remain in the repository for a later, separate mileston
 ## V1 capabilities
 
 - Scan Python project modules and report syntax errors without executing scanned source files.
-- Scan JavaScript modules, map local imports, and check syntax with Node.js parsing only; scanned source is never executed.
+- Include Python and JavaScript source in bounded task context; map JavaScript symbols/local imports and check syntax with Node.js parsing only. Scanned source is never executed.
 - Build project context and inspect approved workspace files through a registered tool interface.
 - Run only explicitly registered test suites.
 - Track development tasks and their lifecycle.
