@@ -1,3 +1,4 @@
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -51,6 +52,27 @@ class ErrorDiagnosticsTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "PASS")
         self.assertEqual(report["project_scan"]["syntax_errors"], [])
+
+    def test_javascript_syntax_error_is_reported(self):
+        if not shutil.which("node"):
+            self.skipTest("Node.js is not installed")
+
+        (self.root / "workspace" / "broken.mjs").write_text(
+            "export const = ;\\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "engine.error_diagnostics.HealthChecker.run",
+            return_value={"status": "PASS", "checks": {}, "read_only": True},
+        ):
+            report = ErrorDiagnostics(self.root).diagnose()
+
+        self.assertEqual(report["status"], "FAIL")
+        self.assertEqual(
+            report["project_scan"]["javascript_syntax_errors"][0]["path"],
+            "workspace/broken.mjs",
+        )
 
     def test_tests_are_not_run_by_default(self):
         engine = Mock()
