@@ -1,6 +1,7 @@
 # ELON
 
 See [MILESTONES.md](MILESTONES.md) for the Phase 2 roadmap, current completion status, and acceptance evidence.
+See [RUNBOOK.md](RUNBOOK.md) for safe operation, approval, and crash-recovery procedures.
 
 ELON is a general-purpose developer-agent project. The V1 foundation prioritizes deterministic project inspection, task tracking, registered testing, controlled change workflows, crash recovery, and auditable operations.
 
