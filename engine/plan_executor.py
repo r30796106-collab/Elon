@@ -29,6 +29,43 @@ class PlanExecutor:
     def _audit(self, event, details):
         self.engine.audit.append(event, details)
 
+    def _audit_contains_event(self, event_name, plan_id):
+        path = self.engine.audit.path
+        if not path.exists():
+            return False
+
+        if not self.engine.audit.verify():
+            raise PlanExecutionError("Audit log integrity check failed.")
+
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line_number, line in enumerate(handle, start=1):
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        raise PlanExecutionError(
+                            f"Audit log is unreadable at line {line_number}."
+                        ) from None
+
+                    if not isinstance(item, dict):
+                        raise PlanExecutionError(
+                            f"Audit record {line_number} is invalid."
+                        )
+
+                    details = item.get("details")
+                    if (
+                        item.get("event") == event_name
+                        and isinstance(details, dict)
+                        and details.get("plan_id") == plan_id
+                    ):
+                        return True
+        except OSError as error:
+            raise PlanExecutionError(
+                f"Audit log could not be read: {error}"
+            ) from None
+
+        return False
+
     def _fresh_validate(self, record, task):
         plan = record.get("plan")
 
@@ -269,13 +306,28 @@ class PlanExecutor:
                 else "failed"
             )
             if task.get("status") in ("pending", "in_progress"):
+                if not self._audit_contains_event(
+                    "PLAN_TASK_STATUS_RECONCILED",
+                    plan_id,
+                ):
+                    self._audit("PLAN_TASK_STATUS_RECONCILED", {
+                        "plan_id": plan_id,
+                        "task_id": task_id,
+                        "state": execution["state"],
+                        "status": expected_status,
+                    })
                 self.engine.update_task_status(task_id, expected_status)
-                self._audit("PLAN_TASK_STATUS_RECONCILED", {
-                    "plan_id": plan_id,
-                    "task_id": task_id,
-                    "state": execution["state"],
-                    "status": expected_status,
-                })
+            elif task.get("status") == expected_status:
+                if not self._audit_contains_event(
+                    "PLAN_TASK_STATUS_RECONCILED",
+                    plan_id,
+                ):
+                    self._audit("PLAN_TASK_STATUS_RECONCILED", {
+                        "plan_id": plan_id,
+                        "task_id": task_id,
+                        "state": execution["state"],
+                        "status": expected_status,
+                    })
             elif task.get("status") != expected_status:
                 raise PlanExecutionError(
                     "Terminal plan execution conflicts with terminal task status; "
