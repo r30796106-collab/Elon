@@ -45,6 +45,7 @@ python main.py scaffold-propose demo_app --language python --description "A smal
 python main.py scaffold-list
 python main.py scaffold-approve PROPOSAL_ID
 python main.py scaffold-apply PROPOSAL_ID
+python main.py scaffold-verify PROPOSAL_ID
 ```
 
 Generated projects are restricted to `workspace/generated_projects/`. Existing destinations are never overwritten. No packages are installed and generated code is not executed. If application is interrupted, confirm the original process has stopped before recovery:
