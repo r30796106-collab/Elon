@@ -411,6 +411,8 @@ class ProjectScaffolder:
         if not self.PROJECT_NAME_RE.fullmatch(record.get("project_name", "")):
             raise ScaffoldingError("Invalid scaffold project name.")
         target = self.generated / record["project_name"]
+        if target.is_symlink():
+            raise ScaffoldingError("Scaffold destination must not be a symlink.")
         if target.resolve().parent != self.generated.resolve():
             raise ScaffoldingError("Scaffold destination escaped generated_projects.")
         if self.generated.is_symlink() or self.workspace.is_symlink():
@@ -478,8 +480,19 @@ class ProjectScaffolder:
             ):
                 current_path = Path(current)
                 for directory in directories:
-                    if (current_path / directory).is_symlink():
+                    directory_path = current_path / directory
+                    if directory_path.is_symlink():
                         raise ScaffoldingError("Generated project contains a symlink.")
+                    relative_directory = directory_path.relative_to(
+                        target
+                    ).as_posix()
+                    if not any(
+                        expected_path.startswith(relative_directory + "/")
+                        for expected_path in expected_paths
+                    ):
+                        raise ScaffoldingError(
+                            f"Unexpected directory in generated project: {relative_directory}"
+                        )
                 for filename in filenames:
                     existing = current_path / filename
                     if existing.is_symlink():
