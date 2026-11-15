@@ -215,6 +215,56 @@ class TestPlanExecutor(unittest.TestCase):
 
         self.assertFalse(self.lock_path(record["plan_id"]).exists())
 
+    def test_reconciliation_retries_when_audit_append_fails(self):
+        record = self.save_approved()
+        record["execution"] = {
+            "state": "completed",
+            "started_at": self.manager._now(),
+            "finished_at": self.manager._now(),
+        }
+        self.manager._write(self.manager._path(record["plan_id"]), record)
+
+        original_append = self.engine.audit.append
+        failed = {"value": False}
+
+        def fail_reconciliation_once(event, details):
+            if (
+                event == "PLAN_TASK_STATUS_RECONCILED"
+                and not failed["value"]
+            ):
+                failed["value"] = True
+                raise OSError("simulated audit append failure")
+            return original_append(event, details)
+
+        with patch.object(
+            self.engine.audit,
+            "append",
+            side_effect=fail_reconciliation_once,
+        ):
+            with self.assertRaises(OSError):
+                self.executor.execute(record["plan_id"])
+
+            self.assertEqual(
+                self.engine.get_task(self.task_id)["status"],
+                "pending",
+            )
+
+            with self.assertRaises(PlanExecutionError):
+                self.executor.execute(record["plan_id"])
+
+        self.assertEqual(
+            self.engine.get_task(self.task_id)["status"],
+            "completed",
+        )
+        audit_text = (
+            self.root / "logs" / "audit.jsonl"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(
+            audit_text.count("PLAN_TASK_STATUS_RECONCILED"),
+            1,
+        )
+        self.assertTrue(self.engine.audit.verify())
+
     def test_inactive_task_cannot_execute_approved_plan(self):
         for status in ("completed", "cancelled", "failed"):
             with self.subTest(status=status):
