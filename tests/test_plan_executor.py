@@ -329,6 +329,67 @@ class TestPlanExecutor(unittest.TestCase):
         )
         self.assertTrue(self.engine.audit.verify())
 
+    def test_started_audit_append_then_raise_recovers_without_replay(self):
+        record = self.save_approved()
+        original_append = self.engine.audit.append
+        failed = {"value": False}
+
+        def append_then_fail_started(event, details):
+            result = original_append(event, details)
+            if event == "PLAN_EXECUTION_STARTED" and not failed["value"]:
+                failed["value"] = True
+                raise OSError("simulated post-append start audit failure")
+            return result
+
+        with patch.object(
+            self.engine.audit,
+            "append",
+            side_effect=append_then_fail_started,
+        ), patch.object(
+            self.executor,
+            "_execute_step",
+            wraps=self.executor._execute_step,
+        ) as execute_step:
+            with self.assertRaises(OSError):
+                self.executor.execute(record["plan_id"])
+
+            self.assertEqual(execute_step.call_count, 0)
+
+        saved = self.manager.get_plan(record["plan_id"])
+        self.assertEqual(saved["execution"]["state"], "claimed")
+        self.assertIsNone(saved["execution"]["finished_at"])
+        self.assertTrue(self.lock_path(record["plan_id"]).exists())
+        self.assertEqual(
+            self.engine.get_task(self.task_id)["status"],
+            "pending",
+        )
+
+        audit_text = (self.root / "logs" / "audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(audit_text.count("PLAN_EXECUTION_STARTED"), 1)
+        self.assertNotIn("PLAN_EXECUTION_FINISHED", audit_text)
+        self.assertTrue(self.engine.audit.verify())
+
+        recovered = self.manager.mark_interrupted(
+            record["plan_id"],
+            confirm_stopped=True,
+        )
+        self.assertEqual(recovered["execution"]["state"], "interrupted")
+        self.assertTrue(self.lock_path(record["plan_id"]).exists())
+        self.assertEqual(
+            self.engine.get_task(self.task_id)["status"],
+            "pending",
+        )
+
+        audit_text = (self.root / "logs" / "audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(audit_text.count("PLAN_EXECUTION_STARTED"), 1)
+        self.assertEqual(audit_text.count("PLAN_EXECUTION_INTERRUPTED"), 1)
+        self.assertNotIn("PLAN_EXECUTION_FINISHED", audit_text)
+        self.assertTrue(self.engine.audit.verify())
+
     def test_finished_audit_event_retries_without_replaying_steps(self):
         record = self.save_approved()
         original_append = self.engine.audit.append
