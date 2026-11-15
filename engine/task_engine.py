@@ -282,7 +282,7 @@ class TaskEngine:
     def update_task_status(self, task_id, status):
         """Set a task status using an explicit allowlist."""
         allowed = {"pending", "in_progress", "completed", "failed", "cancelled"}
-        if status not in allowed:
+        if not isinstance(status, str) or status not in allowed:
             raise ValueError("Invalid task status")
 
         task = self.get_task(task_id)

@@ -215,6 +215,227 @@ class TestPlanExecutor(unittest.TestCase):
 
         self.assertFalse(self.lock_path(record["plan_id"]).exists())
 
+    def test_reconciliation_retries_when_audit_append_fails(self):
+        saved = self.save_approved()
+        # approve() persists a separately loaded record; reload it so this
+        # simulated terminal execution retains the approved status.
+        record = self.manager.get_plan(saved["plan_id"])
+        record["execution"] = {
+            "state": "completed",
+            "started_at": self.manager._now(),
+            "finished_at": self.manager._now(),
+        }
+        self.manager._write(self.manager._path(record["plan_id"]), record)
+
+        original_append = self.engine.audit.append
+        failed = {"value": False}
+
+        def fail_reconciliation_once(event, details):
+            if (
+                event == "PLAN_TASK_STATUS_RECONCILED"
+                and not failed["value"]
+            ):
+                failed["value"] = True
+                raise OSError("simulated audit append failure")
+            return original_append(event, details)
+
+        with patch.object(
+            self.engine.audit,
+            "append",
+            side_effect=fail_reconciliation_once,
+        ):
+            with self.assertRaises(OSError):
+                self.executor.execute(record["plan_id"])
+
+            self.assertEqual(
+                self.engine.get_task(self.task_id)["status"],
+                "pending",
+            )
+
+            with self.assertRaises(PlanExecutionError):
+                self.executor.execute(record["plan_id"])
+
+        self.assertEqual(
+            self.engine.get_task(self.task_id)["status"],
+            "completed",
+        )
+        audit_text = (
+            self.root / "logs" / "audit.jsonl"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(
+            audit_text.count("PLAN_TASK_STATUS_RECONCILED"),
+            1,
+        )
+        self.assertTrue(self.engine.audit.verify())
+
+    def test_started_audit_failure_keeps_claim_nonterminal(self):
+        record = self.save_approved()
+        original_append = self.engine.audit.append
+
+        def fail_started(event, details):
+            if event == "PLAN_EXECUTION_STARTED":
+                raise OSError("simulated start audit failure")
+            return original_append(event, details)
+
+        with patch.object(
+            self.engine.audit,
+            "append",
+            side_effect=fail_started,
+        ), patch.object(
+            self.executor,
+            "_execute_step",
+            wraps=self.executor._execute_step,
+        ) as execute_step:
+            with self.assertRaises(OSError):
+                self.executor.execute(record["plan_id"])
+
+            self.assertEqual(execute_step.call_count, 0)
+
+        saved = self.manager.get_plan(record["plan_id"])
+        self.assertEqual(saved["execution"]["state"], "claimed")
+        self.assertIsNone(saved["execution"]["finished_at"])
+        self.assertTrue(self.lock_path(record["plan_id"]).exists())
+        self.assertEqual(
+            self.engine.get_task(self.task_id)["status"],
+            "pending",
+        )
+
+        audit_text = (self.root / "logs" / "audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("PLAN_EXECUTION_STARTED", audit_text)
+        self.assertNotIn("PLAN_EXECUTION_FINISHED", audit_text)
+        self.assertTrue(self.engine.audit.verify())
+
+        # Cross-component recovery: after confirming the original executor
+        # process is stopped, PlanApprovalManager can safely mark the durable
+        # claim interrupted without replaying any plan step.
+        recovered = self.manager.mark_interrupted(
+            record["plan_id"],
+            confirm_stopped=True,
+        )
+        self.assertEqual(recovered["execution"]["state"], "interrupted")
+        self.assertTrue(self.lock_path(record["plan_id"]).exists())
+        self.assertEqual(
+            self.engine.get_task(self.task_id)["status"],
+            "pending",
+        )
+        audit_text = (self.root / "logs" / "audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(
+            audit_text.count("PLAN_EXECUTION_INTERRUPTED"),
+            1,
+        )
+        self.assertTrue(self.engine.audit.verify())
+
+    def test_finished_audit_event_retries_without_replaying_steps(self):
+        record = self.save_approved()
+        original_append = self.engine.audit.append
+        failed = {"value": False}
+
+        def fail_finished_once(event, details):
+            if event == "PLAN_EXECUTION_FINISHED" and not failed["value"]:
+                failed["value"] = True
+                raise OSError("simulated finalization audit failure")
+            return original_append(event, details)
+
+        with patch.object(
+            self.engine.audit,
+            "append",
+            side_effect=fail_finished_once,
+        ), patch.object(
+            self.executor,
+            "_execute_step",
+            wraps=self.executor._execute_step,
+        ) as execute_step:
+            with self.assertRaises(OSError):
+                self.executor.execute(record["plan_id"])
+
+            self.assertEqual(execute_step.call_count, 1)
+            self.assertEqual(
+                self.engine.get_task(self.task_id)["status"],
+                "completed",
+            )
+
+            with self.assertRaises(PlanExecutionError):
+                self.executor.execute(record["plan_id"])
+
+            self.assertEqual(execute_step.call_count, 1)
+
+        audit_text = (self.root / "logs" / "audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(
+            audit_text.count("PLAN_EXECUTION_FINISHED"),
+            1,
+        )
+        self.assertTrue(self.engine.audit.verify())
+
+    def test_inactive_task_cannot_execute_approved_plan(self):
+        for status in ("completed", "cancelled", "failed"):
+            with self.subTest(status=status):
+                task_id = self.engine.create_task(
+                    "Calculator addition",
+                    "Inspect calculator addition implementation.",
+                )
+                record = self.save_approved(task_id=task_id)
+                self.engine.update_task_status(task_id, status)
+
+                with self.assertRaises(PlanExecutionError):
+                    self.executor.execute(record["plan_id"])
+
+                self.assertFalse(self.lock_path(record["plan_id"]).exists())
+                saved = self.manager.get_plan(record["plan_id"])
+                self.assertNotIn("execution", saved)
+
+
+    def test_terminal_execution_reconciles_task_status_without_replay(self):
+        record = self.save_approved()
+        original_update = self.engine.update_task_status
+        update_calls = {"count": 0}
+
+        def fail_once(task_id, status):
+            update_calls["count"] += 1
+            if update_calls["count"] == 1:
+                raise RuntimeError("simulated finalization interruption")
+            return original_update(task_id, status)
+
+        with patch.object(
+            self.engine,
+            "update_task_status",
+            side_effect=fail_once,
+        ), patch.object(
+            self.executor,
+            "_execute_step",
+            wraps=self.executor._execute_step,
+        ) as execute_step:
+            with self.assertRaises(RuntimeError):
+                self.executor.execute(record["plan_id"])
+
+            saved = self.manager.get_plan(record["plan_id"])
+            self.assertEqual(saved["execution"]["state"], "completed")
+            self.assertEqual(
+                self.engine.get_task(self.task_id)["status"],
+                "pending",
+            )
+            self.assertEqual(execute_step.call_count, 1)
+
+            with self.assertRaises(PlanExecutionError):
+                self.executor.execute(record["plan_id"])
+
+            self.assertEqual(execute_step.call_count, 1)
+
+        self.assertEqual(
+            self.engine.get_task(self.task_id)["status"],
+            "completed",
+        )
+        audit_text = (self.root / "logs" / "audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("PLAN_TASK_STATUS_RECONCILED", audit_text)
+        self.assertTrue(self.engine.audit.verify())
+
     def test_unapproved_plan_cannot_execute(self):
         plan = self.make_plan()
         record = self.manager.save_plan(self.task_id, plan)

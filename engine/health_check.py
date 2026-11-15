@@ -184,14 +184,25 @@ class HealthChecker:
                     )
                 }
 
+                if "patch_recovery_audit_outbox" in tables:
+                    pending_audit_events = db.execute(
+                        """SELECT COUNT(*) FROM patch_recovery_audit_outbox
+                           WHERE delivered_at IS NULL"""
+                    ).fetchone()[0]
+                    if pending_audit_events:
+                        warnings.append(
+                            f"{pending_audit_events} patch recovery audit "
+                            "outbox event(s) pending delivery."
+                        )
+
                 if not {"patch_transactions", "patch_transaction_files"}.issubset(tables):
                     return {
-                        "status": "PASS",
+                        "status": "WARN" if warnings else "PASS",
                         "message": (
                             "Cross-store checks skipped: minimal transaction schema; "
                             "database integrity and unfinished-transaction checks remain active."
                         ),
-                        "warnings": [],
+                        "warnings": warnings,
                         "critical_issues": [],
                         "read_only": True,
                     }
@@ -206,12 +217,12 @@ class HealthChecker:
                     "transaction_id", "task_id", "proposal_id", "status"
                 }.issubset(columns):
                     return {
-                        "status": "PASS",
+                        "status": "WARN" if warnings else "PASS",
                         "message": (
                             "Cross-store checks skipped: transaction schema "
                             "does not contain all diagnostic fields."
                         ),
-                        "warnings": [],
+                        "warnings": warnings,
                         "critical_issues": [],
                         "read_only": True,
                     }

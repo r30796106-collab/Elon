@@ -148,6 +148,44 @@ class PlanApprovalManager:
 
         return record
 
+    def _audit_contains_interruption_event(self, plan_id):
+        path = self.audit.path
+        if not path.exists():
+            return False
+
+        if not self.audit.verify():
+            raise PlanApprovalError("Audit log integrity check failed.")
+
+        found = False
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line_number, line in enumerate(handle, start=1):
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        raise PlanApprovalError(
+                            f"Audit log is unreadable at line {line_number}."
+                        ) from None
+
+                    if not isinstance(event, dict):
+                        raise PlanApprovalError(
+                            f"Audit record {line_number} is invalid."
+                        )
+
+                    details = event.get("details")
+                    if (
+                        event.get("event") == "PLAN_EXECUTION_INTERRUPTED"
+                        and isinstance(details, dict)
+                        and details.get("plan_id") == plan_id
+                    ):
+                        found = True
+        except OSError as error:
+            raise PlanApprovalError(
+                f"Audit log could not be read: {error}"
+            ) from None
+
+        return found
+
     def mark_interrupted(self, plan_id, confirm_stopped=False):
         if confirm_stopped is not True:
             raise PlanApprovalError(
@@ -157,18 +195,27 @@ class PlanApprovalManager:
         record = self._load(plan_id)
         execution = record.get("execution")
 
-        if not isinstance(execution, dict):
-            raise PlanApprovalError("Plan has no execution record.")
-
-        if (
-            execution.get("state") != "claimed"
-            or execution.get("finished_at") is not None
-            or not isinstance(execution.get("started_at"), str)
-            or not execution.get("started_at")
-        ):
-            raise PlanApprovalError(
-                "Only an unfinished claimed execution can be recovered."
-            )
+        if execution is None:
+            # A crash may occur after the exclusive lock is created but
+            # before the claimed execution record is persisted.
+            if record.get("status") != "approved":
+                raise PlanApprovalError(
+                    "Only an approved plan with an orphaned execution lock can be recovered."
+                )
+            started_at = None
+        elif isinstance(execution, dict):
+            if (
+                execution.get("state") != "claimed"
+                or execution.get("finished_at") is not None
+                or not isinstance(execution.get("started_at"), str)
+                or not execution.get("started_at")
+            ):
+                raise PlanApprovalError(
+                    "Only an unfinished claimed execution can be recovered."
+                )
+            started_at = execution["started_at"]
+        else:
+            raise PlanApprovalError("Invalid execution record.")
 
         lock = self.directory / f".execution_{plan_id}.lock"
 
@@ -196,20 +243,24 @@ class PlanApprovalManager:
                 "Execution lock identity does not match the saved plan."
             )
 
+        # Write the audit event first, then persist the terminal recovery
+        # state. If the process stops between these operations, a retry sees
+        # the existing event and completes the plan update without duplication.
+        if not self._audit_contains_interruption_event(plan_id):
+            self.audit.append("PLAN_EXECUTION_INTERRUPTED", {
+                "plan_id": plan_id,
+                "task_id": record["task_id"],
+                "plan_hash": record["plan_hash"],
+                "lock_retained": True,
+            })
+
         record["execution"] = {
             "state": "interrupted",
-            "started_at": execution["started_at"],
+            "started_at": started_at,
             "finished_at": self._now(),
         }
 
         self._write(self._path(plan_id), record)
-
-        self.audit.append("PLAN_EXECUTION_INTERRUPTED", {
-            "plan_id": plan_id,
-            "task_id": record["task_id"],
-            "plan_hash": record["plan_hash"],
-            "lock_retained": True,
-        })
 
         return record
 

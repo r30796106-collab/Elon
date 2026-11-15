@@ -29,6 +29,43 @@ class PlanExecutor:
     def _audit(self, event, details):
         self.engine.audit.append(event, details)
 
+    def _audit_contains_event(self, event_name, plan_id):
+        path = self.engine.audit.path
+        if not path.exists():
+            return False
+
+        if not self.engine.audit.verify():
+            raise PlanExecutionError("Audit log integrity check failed.")
+
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line_number, line in enumerate(handle, start=1):
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        raise PlanExecutionError(
+                            f"Audit log is unreadable at line {line_number}."
+                        ) from None
+
+                    if not isinstance(item, dict):
+                        raise PlanExecutionError(
+                            f"Audit record {line_number} is invalid."
+                        )
+
+                    details = item.get("details")
+                    if (
+                        item.get("event") == event_name
+                        and isinstance(details, dict)
+                        and details.get("plan_id") == plan_id
+                    ):
+                        return True
+        except OSError as error:
+            raise PlanExecutionError(
+                f"Audit log could not be read: {error}"
+            ) from None
+
+        return False
+
     def _fresh_validate(self, record, task):
         plan = record.get("plan")
 
@@ -252,6 +289,63 @@ class PlanExecutor:
         if task is None or task.get("id") != task_id:
             raise PlanExecutionError("Plan task does not exist.")
 
+        # A process may stop after the terminal plan record is saved but
+        # before the task status is synchronized. Reconcile that safe,
+        # idempotent tail on the next explicit execution attempt; never replay
+        # the plan's steps.
+        execution = record.get("execution")
+        if (
+            isinstance(execution, dict)
+            and execution.get("state") in ("completed", "failed")
+            and isinstance(execution.get("finished_at"), str)
+            and execution.get("finished_at")
+        ):
+            expected_status = (
+                "completed"
+                if execution["state"] == "completed"
+                else "failed"
+            )
+            if task.get("status") in ("pending", "in_progress"):
+                if not self._audit_contains_event(
+                    "PLAN_TASK_STATUS_RECONCILED",
+                    plan_id,
+                ):
+                    self._audit("PLAN_TASK_STATUS_RECONCILED", {
+                        "plan_id": plan_id,
+                        "task_id": task_id,
+                        "state": execution["state"],
+                        "status": expected_status,
+                    })
+                self.engine.update_task_status(task_id, expected_status)
+            elif task.get("status") != expected_status:
+                raise PlanExecutionError(
+                    "Terminal plan execution conflicts with terminal task status; "
+                    "manual review is required."
+                )
+
+            # The terminal plan record and task status are durable before this
+            # event. Retry the event independently if audit append previously
+            # failed, without replaying any execution steps.
+            if not self._audit_contains_event(
+                "PLAN_EXECUTION_FINISHED",
+                plan_id,
+            ):
+                self._audit("PLAN_EXECUTION_FINISHED", {
+                    "plan_id": plan_id,
+                    "task_id": task_id,
+                    "state": execution["state"],
+                })
+
+            raise PlanExecutionError(
+                "Plan already has a terminal execution record. "
+                "Task status was reconciled if needed; replay is blocked."
+            )
+
+        if task.get("status") not in ("pending", "in_progress"):
+            raise PlanExecutionError(
+                "Plan task is not active; only pending or in-progress tasks can execute."
+            )
+
         plan = record.get("plan")
 
         if record.get("plan_hash") != self.manager._digest(plan):
@@ -284,6 +378,7 @@ class PlanExecutor:
 
         results = []
         state = "failed"
+        started_event_written = False
 
         try:
             self._audit("PLAN_EXECUTION_STARTED", {
@@ -291,6 +386,7 @@ class PlanExecutor:
                 "task_id": task_id,
                 "plan_hash": record["plan_hash"],
             })
+            started_event_written = True
 
             state = "completed"
 
@@ -343,27 +439,31 @@ class PlanExecutor:
                     break
 
         finally:
-            record["execution"] = {
-                "state": state,
-                "started_at": record["execution"]["started_at"],
-                "finished_at": self.manager._now(),
-            }
+            # A failed STARTED audit append means no plan step has begun.
+            # Keep the durable claim non-terminal so explicit interruption
+            # recovery can handle it; do not mislabel the task as failed.
+            if started_event_written:
+                record["execution"] = {
+                    "state": state,
+                    "started_at": record["execution"]["started_at"],
+                    "finished_at": self.manager._now(),
+                }
 
-            self.manager._write(
-                self.manager._path(plan_id),
-                record,
-            )
+                self.manager._write(
+                    self.manager._path(plan_id),
+                    record,
+                )
 
-            # Synchronize task status after the terminal plan record is saved.
-            self.engine.update_task_status(
-                task_id,
-                "completed" if state == "completed" else "failed",
-            )
-            self._audit("PLAN_EXECUTION_FINISHED", {
-                "plan_id": plan_id,
-                "task_id": task_id,
-                "state": state,
-            })
+                # Synchronize task status after the terminal plan record is saved.
+                self.engine.update_task_status(
+                    task_id,
+                    "completed" if state == "completed" else "failed",
+                )
+                self._audit("PLAN_EXECUTION_FINISHED", {
+                    "plan_id": plan_id,
+                    "task_id": task_id,
+                    "state": state,
+                })
 
         return {
             "plan_id": plan_id,
