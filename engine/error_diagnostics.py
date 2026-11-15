@@ -3,6 +3,7 @@ from pathlib import Path
 
 from engine.health_check import HealthChecker
 from engine.project_intelligence import ProjectScanner
+from engine.javascript_intelligence import JavaScriptScanner
 
 
 class ErrorDiagnostics:
@@ -41,6 +42,7 @@ class ErrorDiagnostics:
 
     def diagnose(self, run_tests=False, test_name="core", traceback_text=None):
         scan = ProjectScanner(self.root).scan()
+        javascript = JavaScriptScanner(self.root).scan()
         health = HealthChecker(self.root).run()
 
         tests = None
@@ -56,10 +58,13 @@ class ErrorDiagnostics:
         traceback = self.parse_traceback(traceback_text)
 
         syntax_errors = scan.get("errors", [])
+        javascript_errors = javascript.get("syntax_errors", [])
         statuses = [health.get("status", "WARN")]
 
-        if syntax_errors:
+        if syntax_errors or javascript.get("status") == "FAIL":
             statuses.append("FAIL")
+        elif javascript.get("status") == "WARN":
+            statuses.append("WARN")
         if tests is not None:
             statuses.append("PASS" if tests.get("success") else "FAIL")
         if traceback:
@@ -78,6 +83,17 @@ class ErrorDiagnostics:
                 location += f":{error['line']}"
             recommendations.append(
                 f"Review Python syntax error at {location}."
+            )
+
+        for error in javascript_errors:
+            location = error.get("path", "unknown file")
+            recommendations.append(
+                f"Review JavaScript syntax/read error at {location}."
+            )
+
+        if javascript.get("status") == "WARN":
+            recommendations.append(
+                "Install or expose Node.js to enable read-only JavaScript syntax checks."
             )
 
         if health.get("status") != "PASS":
@@ -111,6 +127,8 @@ class ErrorDiagnostics:
                 "dependencies": scan.get("dependencies", {}),
                 "dependents": scan.get("dependents", {}),
                 "skipped": scan.get("skipped", []),
+                "javascript": javascript,
+                "javascript_syntax_errors": javascript_errors,
             },
             "health": health,
             "tests": tests,
