@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from engine.project_context import ProjectContextBuilder
+from engine.javascript_intelligence import JavaScriptScanner
 
 
 class TestProjectContextBuilder(unittest.TestCase):
@@ -178,6 +179,10 @@ class TestProjectContextBuilder(unittest.TestCase):
             'export function testBuildProject() { return buildProject("ELON"); }\n',
             encoding="utf-8",
         )
+
+        javascript_report = JavaScriptScanner(self.root).scan()
+        self.assertIn("src/main", javascript_report["modules"])
+        self.assertIn("src/helper", javascript_report["modules"])
 
         result = self.builder.build("build project normalize")
 
