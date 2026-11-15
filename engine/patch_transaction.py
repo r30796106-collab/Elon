@@ -95,6 +95,15 @@ class PatchTransaction:
                     raise PolicyError(
                         "Recovery audit outbox delivery state conflict"
                     )
+                # The outbox is created only after every file has been restored
+                # and the transaction was finalized. If delivery previously
+                # failed, startup replay must also reconcile the journal status.
+                db.execute(
+                    """UPDATE patch_transactions
+                       SET status = 'rolled_back', error = NULL, updated_at = ?
+                       WHERE transaction_id = ? AND status = 'recovery_required'""",
+                    (self._now(), transaction_id),
+                )
 
     @staticmethod
     def _hash(data):
