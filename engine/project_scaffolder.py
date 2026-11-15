@@ -591,6 +591,20 @@ class ProjectScaffolder:
         record = self._load(proposal_id)
         expected = self._validate_record_files(record)
         target = self._target_path(record)
+        if (
+            record["status"] != "applied"
+            or not self._audit_contains("PROJECT_SCAFFOLD_APPLIED", proposal_id)
+        ):
+            return {
+                "status": "FAIL",
+                "read_only": True,
+                "proposal_id": proposal_id,
+                "target": record["target"],
+                "reason": "Applied state or audit evidence is missing.",
+                "missing": sorted(expected),
+                "modified": [],
+                "unexpected": [],
+            }
         missing = []
         modified = []
         unexpected = []
@@ -627,10 +641,14 @@ class ProjectScaffolder:
             current_path = Path(current)
             for directory in directories:
                 directory_path = current_path / directory
-                if directory_path.is_symlink():
-                    unexpected.append(
-                        directory_path.relative_to(target).as_posix()
-                    )
+                relative_directory = directory_path.relative_to(
+                    target
+                ).as_posix()
+                if directory_path.is_symlink() or not any(
+                    expected_path.startswith(relative_directory + "/")
+                    for expected_path in expected
+                ):
+                    unexpected.append(relative_directory)
             for filename in filenames:
                 path = current_path / filename
                 relative = path.relative_to(target).as_posix()
