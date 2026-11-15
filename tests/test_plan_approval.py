@@ -126,6 +126,54 @@ class TestPlanApproval(unittest.TestCase):
         )
         return record, lock
 
+    def test_recovery_marks_orphaned_execution_lock_interrupted(self):
+        record = self.save()
+        record["status"] = "approved"
+        self.manager._write(
+            self.manager._path(record["plan_id"]),
+            record,
+        )
+        lock = self.manager.directory / f".execution_{record['plan_id']}.lock"
+        lock.write_text(json.dumps({
+            "plan_id": record["plan_id"],
+            "task_id": record["task_id"],
+            "plan_hash": record["plan_hash"],
+        }), encoding="utf-8")
+
+        result = self.manager.mark_interrupted(
+            record["plan_id"],
+            confirm_stopped=True,
+        )
+
+        self.assertEqual(result["execution"]["state"], "interrupted")
+        self.assertIsNone(result["execution"]["started_at"])
+        self.assertIsNotNone(result["execution"]["finished_at"])
+        self.assertTrue(lock.exists())
+        self.assertTrue(self.manager.audit.verify())
+
+    def test_orphaned_execution_lock_recovery_requires_confirmation(self):
+        record = self.save()
+        record["status"] = "approved"
+        self.manager._write(
+            self.manager._path(record["plan_id"]),
+            record,
+        )
+        lock = self.manager.directory / f".execution_{record['plan_id']}.lock"
+        lock.write_text(json.dumps({
+            "plan_id": record["plan_id"],
+            "task_id": record["task_id"],
+            "plan_hash": record["plan_hash"],
+        }), encoding="utf-8")
+
+        with self.assertRaises(PlanApprovalError):
+            self.manager.mark_interrupted(record["plan_id"])
+
+        self.assertNotIn(
+            "execution",
+            self.manager.get_plan(record["plan_id"]),
+        )
+        self.assertTrue(lock.exists())
+
     def test_recovery_marks_claimed_execution_interrupted(self):
         record, lock = self.make_claimed_execution()
 
