@@ -242,8 +242,8 @@ class TestPlanApproval(unittest.TestCase):
 
     def test_interrupted_recovery_preserves_completed_step_checkpoints(self):
         record, lock = self.make_claimed_execution()
-        record["execution"]["completed_steps"] = [1, 2]
-        record["execution"]["last_completed_step"] = 2
+        record["execution"]["completed_steps"] = [1]
+        record["execution"]["last_completed_step"] = 1
         record["execution"]["last_checkpoint_state"] = "completed"
         record["execution"]["last_checkpoint_at"] = self.manager._now()
         self.manager._write(
@@ -262,11 +262,11 @@ class TestPlanApproval(unittest.TestCase):
         )
         self.assertEqual(
             recovered["execution"]["completed_steps"],
-            [1, 2],
+            [1],
         )
         self.assertEqual(
             recovered["execution"]["last_completed_step"],
-            2,
+            1,
         )
         self.assertTrue(lock.exists())
 
