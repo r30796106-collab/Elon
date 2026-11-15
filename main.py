@@ -516,11 +516,27 @@ def main():
         elif args.command == "plan-progress":
             manager = PlanApprovalManager(ROOT)
             record = manager.get_plan(args.plan_id)
+            execution = record.get("execution") or {}
+            completed_steps = execution.get("completed_steps", [])
+            total_steps = len(record["plan"]["steps"])
+            progress_percent = (
+                round(len(completed_steps) * 100 / total_steps, 1)
+                if total_steps else 0
+            )
             print(json.dumps({
                 "plan_id": record["plan_id"],
                 "task_id": record["task_id"],
                 "status": record["status"],
-                "execution": record.get("execution"),
+                "progress": {
+                    "completed_steps": len(completed_steps),
+                    "total_steps": total_steps,
+                    "percent": progress_percent,
+                    "failed_step": execution.get("failed_step"),
+                    "last_checkpoint_state": execution.get(
+                        "last_checkpoint_state"
+                    ),
+                },
+                "execution": execution,
             }, ensure_ascii=False, indent=2))
 
         elif args.command == "approve":
