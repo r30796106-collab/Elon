@@ -33,6 +33,7 @@ class PatchTransaction:
         if not path.exists():
             return False
 
+        found = False
         with path.open("r", encoding="utf-8") as handle:
             for line_number, line in enumerate(handle, start=1):
                 try:
@@ -53,9 +54,9 @@ class PatchTransaction:
                     and isinstance(details, dict)
                     and details.get("transaction_id") == transaction_id
                 ):
-                    return True
+                    found = True
 
-        return False
+        return found
 
     def _flush_recovery_audit_outbox(self):
         with self.engine._connect() as db:
