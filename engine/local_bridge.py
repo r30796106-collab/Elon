@@ -1,5 +1,6 @@
 import hmac
 import json
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -12,6 +13,8 @@ class LocalBridgeServer:
     HOST = "127.0.0.1"
     MAX_REQUEST_BYTES = 8 * 1024
     MAX_RESPONSE_BYTES = 300 * 1024
+    REQUEST_TIMEOUT_SECONDS = 10
+    MAX_CONCURRENT_REQUESTS = 16
 
     ALLOWED_TOOLS = {
         "list_workspace_files",
@@ -40,6 +43,10 @@ class LocalBridgeServer:
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
+            def setup(self):
+                super().setup()
+                self.connection.settimeout(owner.REQUEST_TIMEOUT_SECONDS)
+
             server_version = "ELON-LocalBridge"
             sys_version = ""
 
@@ -210,6 +217,27 @@ class LocalBridgeServer:
         class Server(ThreadingHTTPServer):
             daemon_threads = True
             allow_reuse_address = False
+            request_slots = threading.BoundedSemaphore(
+                owner.MAX_CONCURRENT_REQUESTS
+            )
+
+            def process_request(self, request, client_address):
+                # Bound per-client threads so local callers cannot exhaust
+                # resources by opening many simultaneous connections.
+                if not self.request_slots.acquire(blocking=False):
+                    self.shutdown_request(request)
+                    return
+                try:
+                    super().process_request(request, client_address)
+                except Exception:
+                    self.request_slots.release()
+                    raise
+
+            def process_request_thread(self, request, client_address):
+                try:
+                    super().process_request_thread(request, client_address)
+                finally:
+                    self.request_slots.release()
 
         self.server = Server((self.HOST, port), Handler)
 
