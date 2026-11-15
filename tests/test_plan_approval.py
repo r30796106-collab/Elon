@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,6 +42,24 @@ class TestPlanApproval(unittest.TestCase):
 
     def save(self):
         return self.manager.save_plan(1, VALID_PLAN)
+
+    def test_plan_write_fsyncs_file_before_returning(self):
+        record = self.save()
+        record["durability_probe"] = True
+        path = self.manager._path(record["plan_id"])
+
+        from unittest.mock import patch
+        with patch(
+            "engine.plan_approval.os.fsync",
+            wraps=os.fsync,
+        ) as sync:
+            self.manager._write(path, record)
+
+        self.assertGreaterEqual(sync.call_count, 1)
+        self.assertTrue(path.is_file())
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertTrue(saved["durability_probe"])
+        self.assertEqual(saved["plan_hash"], record["plan_hash"])
 
     def test_save_plan_pending(self):
         record = self.save()
