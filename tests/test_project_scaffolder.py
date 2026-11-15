@@ -161,6 +161,22 @@ class ProjectScaffolderTests(unittest.TestCase):
         with self.assertRaisesRegex(ScaffoldingError, "symlinks"):
             self.propose()
 
+    def test_forged_approved_state_without_audit_event_is_rejected(self):
+        record = self.propose()
+        record["status"] = "approved"
+        record["approved_at"] = self.scaffolder._now()
+        self.scaffolder._write_record(
+            self.scaffolder._proposal_path(record["proposal_id"]),
+            record,
+        )
+
+        with self.assertRaisesRegex(ScaffoldingError, "audit evidence"):
+            self.scaffolder.apply(record["proposal_id"])
+
+        self.assertFalse(
+            (self.root / "workspace" / "generated_projects" / "sample_app").exists()
+        )
+
     def test_tampered_proposal_content_is_rejected_before_approval(self):
         record = self.propose()
         path = self.scaffolder._proposal_path(record["proposal_id"])
