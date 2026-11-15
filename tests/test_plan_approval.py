@@ -290,6 +290,57 @@ class TestPlanApproval(unittest.TestCase):
         self.assertEqual(len(matching), 1)
         self.assertTrue(self.manager.audit.verify())
 
+    def test_interrupted_audit_sync_failure_retries_without_duplicate_event(self):
+        record, lock = self.make_claimed_execution()
+        original_sync = self.manager._fsync_audit_log
+        failed = {"value": False}
+
+        def fail_sync_once():
+            if not failed["value"]:
+                failed["value"] = True
+                raise OSError("simulated interruption audit sync failure")
+            return original_sync()
+
+        from unittest.mock import patch
+        with patch.object(
+            self.manager,
+            "_fsync_audit_log",
+            side_effect=fail_sync_once,
+        ):
+            with self.assertRaisesRegex(
+                OSError,
+                "interruption audit sync failure",
+            ):
+                self.manager.mark_interrupted(
+                    record["plan_id"],
+                    confirm_stopped=True,
+                )
+
+            self.assertEqual(
+                self.manager.get_plan(record["plan_id"])["execution"]["state"],
+                "claimed",
+            )
+            recovered = self.manager.mark_interrupted(
+                record["plan_id"],
+                confirm_stopped=True,
+            )
+
+        self.assertEqual(recovered["execution"]["state"], "interrupted")
+        self.assertTrue(lock.exists())
+        audit_lines = [
+            json.loads(line)
+            for line in (self.root / "logs" / "audit.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        matching = [
+            item for item in audit_lines
+            if item.get("event") == "PLAN_EXECUTION_INTERRUPTED"
+            and item.get("details", {}).get("plan_id") == record["plan_id"]
+        ]
+        self.assertEqual(len(matching), 1)
+        self.assertTrue(self.manager.audit.verify())
+
     def test_recovery_marks_claimed_execution_interrupted(self):
         record, lock = self.make_claimed_execution()
 
