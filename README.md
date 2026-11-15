@@ -15,6 +15,7 @@ AI-provider integrations remain in the repository for a later, separate mileston
 - Track development tasks and their lifecycle.
 - Inspect Git branch, working-tree changes, diffs, and recent commits without modifying the repository.
 - Inspect Python/Node runtimes and declared dependencies without installing packages or using the network.
+- Measure read-only project scan, JavaScript scan, health-check, and context-build performance baselines.
 - Generate bounded, deterministic read-only plans without an external AI provider.
 - Prepare and review controlled patch proposals; applying changes is a separate approval-gated action.
 - Keep backups and transaction journals for patch operations.
@@ -46,6 +47,14 @@ Run diagnostics with the full registered test suite:
 ```bash
 python main.py diagnose --tests --test full
 ```
+
+Measure read-only performance baselines:
+
+```bash
+python main.py benchmark --iterations 3
+```
+
+The benchmark reports timing only; it does not modify project files or apply optimizations.
 
 Inspect runtime and dependency state without installing anything:
 
