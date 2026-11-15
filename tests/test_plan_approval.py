@@ -189,6 +189,36 @@ class TestPlanApproval(unittest.TestCase):
         )
         return record, lock
 
+    def test_interrupted_recovery_preserves_completed_step_checkpoints(self):
+        record, lock = self.make_claimed_execution()
+        record["execution"]["completed_steps"] = [1, 2]
+        record["execution"]["last_completed_step"] = 2
+        record["execution"]["last_checkpoint_state"] = "completed"
+        record["execution"]["last_checkpoint_at"] = self.manager._now()
+        self.manager._write(
+            self.manager._path(record["plan_id"]),
+            record,
+        )
+
+        recovered = self.manager.mark_interrupted(
+            record["plan_id"],
+            confirm_stopped=True,
+        )
+
+        self.assertEqual(
+            recovered["execution"]["state"],
+            "interrupted",
+        )
+        self.assertEqual(
+            recovered["execution"]["completed_steps"],
+            [1, 2],
+        )
+        self.assertEqual(
+            recovered["execution"]["last_completed_step"],
+            2,
+        )
+        self.assertTrue(lock.exists())
+
     def test_recovery_marks_orphaned_execution_lock_interrupted(self):
         record = self.save()
         record["status"] = "approved"
