@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import subprocess
 import sys
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +32,7 @@ class TaskEngine:
         self.db_path = self.root / "elon.sqlite3"
 
         self._initialize_database()
+        self._flush_task_status_audit_outbox()
 
     @contextmanager
     def _connect(self):
@@ -92,6 +94,65 @@ class TaskEngine:
                 idx_patch_transactions_task
                 ON patch_transactions(task_id)
             """)
+
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS task_status_audit_outbox (
+                    event_id TEXT PRIMARY KEY,
+                    task_id INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    delivered_at TEXT
+                )
+            """)
+
+    def _flush_task_status_audit_outbox(self):
+        """Deliver pending status events once, recovering safely after a crash."""
+        with self._connect() as db:
+            # Serialize flushers across processes. The audit event ID makes a
+            # retry safe if the process dies after append but before ack.
+            db.execute("BEGIN IMMEDIATE")
+            if not self.audit.verify():
+                raise RuntimeError(
+                    "Audit chain is invalid; task status events remain pending"
+                )
+
+            rows = db.execute(
+                """SELECT event_id, task_id, status
+                FROM task_status_audit_outbox
+                WHERE delivered_at IS NULL
+                ORDER BY created_at, event_id"""
+            ).fetchall()
+
+            audit_records = []
+            if self.audit.path.exists():
+                for line in self.audit.path.read_text().splitlines():
+                    if line.strip():
+                        audit_records.append(json.loads(line))
+
+            delivered_ids = {
+                record.get("details", {}).get("task_status_event_id")
+                for record in audit_records
+                if record.get("event") == "TASK_STATUS_UPDATED"
+                and isinstance(record.get("details"), dict)
+            }
+
+            for event_id, task_id, status in rows:
+                if event_id not in delivered_ids:
+                    self.audit.append(
+                        "TASK_STATUS_UPDATED",
+                        {
+                            "task_id": task_id,
+                            "status": status,
+                            "task_status_event_id": event_id,
+                        },
+                    )
+                db.execute(
+                    """UPDATE task_status_audit_outbox
+                    SET delivered_at = ?
+                    WHERE event_id = ? AND delivered_at IS NULL""",
+                    (datetime.now(timezone.utc).isoformat(), event_id),
+                )
+
 
     def create_task(self, title, description=""):
         if not isinstance(title, str) or not title.strip():
@@ -280,14 +341,17 @@ class TaskEngine:
         }
 
     def update_task_status(self, task_id, status):
-        """Atomically update a task without reviving terminal tasks."""
+        """Atomically update status and enqueue its durable audit event."""
         allowed = {"pending", "in_progress", "completed", "failed", "cancelled"}
         if not isinstance(status, str) or status not in allowed:
             raise ValueError("Invalid task status")
 
-        # Keep the terminal-state check in the UPDATE predicate itself.
-        # A read-then-write check can race when multiple workers update one
-        # task at the same time and accidentally revive a cancelled task.
+        # Deliver older events before accepting another transition.
+        self._flush_task_status_audit_outbox()
+        event_id = uuid.uuid4().hex
+
+        # The status change and outbox insert share one SQLite transaction.
+        # Terminal-state validation stays in the UPDATE predicate.
         with self._connect() as db:
             cursor = db.execute(
                 """
@@ -310,10 +374,20 @@ class TaskEngine:
                     raise ValueError("Task does not exist")
                 raise ValueError("Terminal task status cannot be changed")
 
-        self.audit.append(
-            "TASK_STATUS_UPDATED",
-            {"task_id": task_id, "status": status},
-        )
+            db.execute(
+                """INSERT INTO task_status_audit_outbox
+                (event_id, task_id, status, created_at)
+                VALUES (?, ?, ?, ?)""",
+                (
+                    event_id,
+                    task_id,
+                    status,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
+        # If delivery fails, the committed outbox row is retried on restart.
+        self._flush_task_status_audit_outbox()
         return self.get_task(task_id)
 
     def complete_task(self, task_id):
