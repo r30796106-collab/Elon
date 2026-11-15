@@ -101,6 +101,61 @@ class ElonCoreTests(unittest.TestCase):
         self.engine.create_task("Audit test")
         self.assertTrue(self.engine.audit_valid())
 
+    def test_task_created_audit_outbox_recovers_after_append_failure(self):
+        import json
+
+        original_append = self.engine.audit.append
+        def fail_created(event, details):
+            if event == "TASK_CREATED":
+                raise OSError("simulated task-created audit failure")
+            return original_append(event, details)
+
+        self.engine.audit.append = fail_created
+        with self.assertRaises(OSError):
+            self.engine.create_task("Durable create")
+
+        task_id = self.engine.list_tasks()[0]["id"]
+        with self.engine._connect() as db:
+            pending = db.execute(
+                "SELECT COUNT(*) FROM task_lifecycle_audit_outbox WHERE delivered_at IS NULL"
+            ).fetchone()[0]
+        self.assertEqual(pending, 1)
+
+        recovered = TaskEngine(self.root)
+        records = [json.loads(line) for line in recovered.audit.path.read_text().splitlines()]
+        created = [r for r in records if r.get("event") == "TASK_CREATED" and r.get("details", {}).get("task_lifecycle_event_id")]
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0]["details"]["task_id"], task_id)
+        self.assertTrue(recovered.audit_valid())
+
+    def test_task_completed_audit_outbox_recovers_after_append_failure(self):
+        import json
+
+        task_id = self.engine.create_task("Durable completion")
+        original_append = self.engine.audit.append
+        def fail_completed(event, details):
+            if event == "TASK_COMPLETED":
+                raise OSError("simulated task-completed audit failure")
+            return original_append(event, details)
+
+        self.engine.audit.append = fail_completed
+        with self.assertRaises(OSError):
+            self.engine.complete_task(task_id)
+
+        self.assertEqual(self.engine.get_task(task_id)["status"], "completed")
+        with self.engine._connect() as db:
+            pending = db.execute(
+                "SELECT COUNT(*) FROM task_lifecycle_audit_outbox WHERE delivered_at IS NULL"
+            ).fetchone()[0]
+        self.assertEqual(pending, 1)
+
+        recovered = TaskEngine(self.root)
+        records = [json.loads(line) for line in recovered.audit.path.read_text().splitlines()]
+        completed = [r for r in records if r.get("event") == "TASK_COMPLETED" and r.get("details", {}).get("task_lifecycle_event_id")]
+        self.assertEqual(len(completed), 1)
+        self.assertEqual(completed[0]["details"]["task_id"], task_id)
+        self.assertEqual(recovered.get_task(task_id)["status"], "completed")
+        self.assertTrue(recovered.audit_valid())
     def test_task_status_rejects_unknown_value(self):
         task_id = self.engine.create_task("Status validation")
 
