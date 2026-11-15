@@ -24,15 +24,15 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 | 30 | Dependency / environment management | **Partial** | Read-only Python/Node runtime and manifest inspection. Installation remains blocked by default and requires explicit approval. |
 | 31 | Long-running task management | **Partial** | Persistent task lifecycle, durable per-step plan checkpoints, audit-based checkpoint reconstruction after interruption, exclusive execution locks, and a `plan-progress` command with completion percentage. Background scheduling and multi-session worker management remain. |
 | 32 | Autonomous project testing | **Complete for bounded registered suites** | Registered test runner, full suite, health diagnostics, and GitHub Actions compile + unittest verification. |
-| 33 | Performance optimization | **Partial** | Added repeatable CI benchmarks and removed a second Python AST/file-read pass. Across repeated Ubuntu CI runs (66 modules, 3 runs each), Python scan medians ranged 0.149–0.180s versus the earlier 0.222s baseline (~19–33% faster); the latest run measured 0.166s. Context-build medians ranged 0.333–0.396s versus a 0.363s baseline, so no consistent context-build improvement is claimed. Android/Termux profiling remains. |
+| 33 | Performance optimization | **Partial** | Added repeatable CI benchmarks and removed a second Python AST/file-read pass. After reusing Python symbol metadata from the initial AST pass, the Ubuntu CI runner (66 modules, 3 runs) measured Python scan median 0.133s versus 0.222s baseline (~40% faster) and context build 0.179s versus 0.363s baseline (~51% faster). Android/Termux profiling remains. |
 | 34 | End-to-end autonomous developer testing | **Partial** | End-to-end offline plan → approval → execution, patch workflow integration, crash recovery tests. Full multi-file project-development scenarios remain. |
 | 35 | Production-readiness / security validation | **Partial** | Safety policy, read-only bridge, health/audit checks, protected-path rules, strict persisted-plan/checkpoint validation, GitHub CI, an operational runbook, and a security controls/residual-risks review. Final packaging, Android/Termux device validation, and independent security review remain. |
 
 ## Latest verification
 
 - Development branch: `recovery-partial-audit-2026-11-15`
-- Latest verified commit: `b53ef1cc`
-- GitHub Actions run #249: compile and full unittest suite passed; **277 tests passed**.
+- Latest verified commit: `d67ffd06`
+- GitHub Actions run #257: compile and full unittest suite passed; **277 tests passed**; benchmark step passed.
 - JavaScript context/import integration tests passed on the CI Node.js runtime.
 - CI performance benchmark step passed.
 - Draft PR #1 contains the recovery milestone against `master`.
