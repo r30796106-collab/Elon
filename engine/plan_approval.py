@@ -61,8 +61,23 @@ class PlanApprovalManager:
                 temporary = Path(handle.name)
                 json.dump(record, handle, ensure_ascii=False, indent=2)
                 handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
 
             os.replace(temporary, path)
+
+            # Persist the directory entry where supported so the atomic
+            # replacement survives an abrupt process/device restart.
+            directory_fd = None
+            try:
+                directory_fd = os.open(self.directory, os.O_RDONLY)
+                os.fsync(directory_fd)
+            except OSError:
+                # Some platforms/filesystems do not support directory fsync.
+                pass
+            finally:
+                if directory_fd is not None:
+                    os.close(directory_fd)
         except Exception:
             if temporary and temporary.exists():
                 temporary.unlink()
