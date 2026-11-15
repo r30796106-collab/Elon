@@ -125,10 +125,9 @@ class EnvironmentInspector:
         for name in sorted(names):
             candidate = modules / name
             try:
-                candidate.resolve(strict=True).relative_to(
-                    modules.resolve(strict=True)
-                )
-                present = candidate.is_dir() and not candidate.is_symlink()
+                resolved = candidate.resolve(strict=True)
+                resolved.relative_to(self.root)
+                present = resolved.is_dir()
             except (OSError, ValueError):
                 present = False
 
