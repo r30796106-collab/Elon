@@ -60,6 +60,22 @@ class ProjectScaffolderTests(unittest.TestCase):
         self.assertEqual(repeated["status"], "applied")
         self.assertTrue(self.scaffolder.audit.verify())
 
+    def test_verify_detects_modified_and_unexpected_generated_files(self):
+        record = self.propose()
+        self.scaffolder.approve(record["proposal_id"])
+        self.scaffolder.apply(record["proposal_id"])
+
+        target = self.root / "workspace" / "generated_projects" / "sample_app"
+        (target / "main.py").write_text("print('changed')\\n", encoding="utf-8")
+        (target / "extra.txt").write_text("unexpected", encoding="utf-8")
+
+        report = self.scaffolder.verify(record["proposal_id"])
+
+        self.assertEqual(report["status"], "FAIL")
+        self.assertTrue(report["read_only"])
+        self.assertIn("main.py", report["modified"])
+        self.assertIn("extra.txt", report["unexpected"])
+
     def test_approved_javascript_scaffold_is_created(self):
         record = self.propose("sample_web", "javascript")
         self.scaffolder.approve(record["proposal_id"])
