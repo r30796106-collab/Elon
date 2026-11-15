@@ -1,4 +1,5 @@
 import io
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -103,6 +104,23 @@ class DeterministicTaskPlannerTests(unittest.TestCase):
             original_source,
         )
         self.assertTrue(self.engine.audit.verify())
+
+        progress_output = io.StringIO()
+        with patch.object(elon_main, "ROOT", self.root), patch.object(
+            sys,
+            "argv",
+            ["main.py", "plan-progress", saved["plan_id"]],
+        ), redirect_stdout(progress_output):
+            elon_main.main()
+        progress = json.loads(progress_output.getvalue())
+        self.assertEqual(
+            progress["execution"]["completed_steps"],
+            [1, 2, 3],
+        )
+        self.assertEqual(
+            progress["execution"]["last_checkpoint_state"],
+            "completed",
+        )
 
     def test_plan_cli_works_without_configured_ai_provider(self):
         output = io.StringIO()
