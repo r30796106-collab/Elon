@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 
 from engine.task_engine import TaskEngine
@@ -313,11 +314,14 @@ def main():
                 raise ValueError("Proposal JSON must be a safe relative workspace path")
             if relative.parts[0] != "workspace" or relative.suffix.lower() != ".json":
                 raise ValueError("Proposal JSON must be a .json file inside workspace/")
-            proposal_path = (ROOT / relative).resolve(strict=True)
+            proposal_candidate = ROOT / relative
+            if proposal_candidate.is_symlink():
+                raise ValueError("Proposal JSON must not be a symlink")
+            proposal_path = proposal_candidate.resolve(strict=True)
             workspace_root = (ROOT / "workspace").resolve()
             proposal_path.relative_to(workspace_root)
-            if proposal_path.is_symlink() or not proposal_path.is_file():
-                raise ValueError("Proposal JSON must be a regular non-symlink file")
+            if not proposal_path.is_file():
+                raise ValueError("Proposal JSON must be a regular file")
             if proposal_path.stat().st_size > 16 * 1024 * 1024:
                 raise ValueError("Proposal JSON exceeds the 16 MiB limit")
 
