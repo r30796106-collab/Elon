@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 from engine.project_intelligence import ProjectScanner
+from engine.javascript_intelligence import JavaScriptScanner
 
 
 class ProjectContextBuilder:
@@ -75,7 +76,7 @@ class ProjectContextBuilder:
         if any(word in filename for word in self.EXCLUDED_NAME_PARTS):
             return None
 
-        if relative.suffix != ".py":
+        if relative.suffix.lower() not in {".py", ".js", ".mjs", ".cjs"}:
             return None
 
         path = self.root / relative
@@ -126,7 +127,42 @@ class ProjectContextBuilder:
 
         return sorted(set(word for word in words if word not in ignored))
 
-    def _extract_symbols(self, source):
+    def _extract_symbols(self, source, relative_path=None):
+        suffix = Path(relative_path or "").suffix.lower()
+        if suffix in {".js", ".mjs", ".cjs"}:
+            patterns = (
+                (
+                    re.compile(
+                        r"\\b(?:export\\s+)?(?:default\\s+)?"
+                        r"(?:async\\s+)?function\\s+([A-Za-z_$][\\w$]*)"
+                    ),
+                    "function",
+                ),
+                (
+                    re.compile(r"\\bclass\\s+([A-Za-z_$][\\w$]*)"),
+                    "class",
+                ),
+                (
+                    re.compile(
+                        r"\\b(?:export\\s+)?(?:const|let|var)\\s+"
+                        r"([A-Za-z_$][\\w$]*)\\s*="
+                    ),
+                    "variable",
+                ),
+            )
+            symbols = []
+            for pattern, kind in patterns:
+                for match in pattern.finditer(source):
+                    symbols.append({
+                        "name": match.group(1),
+                        "kind": kind,
+                        "line": source.count("\\n", 0, match.start()) + 1,
+                    })
+            return sorted(
+                symbols,
+                key=lambda item: (item["line"], item["name"]),
+            )
+
         try:
             tree = ast.parse(source)
         except SyntaxError:
@@ -182,7 +218,7 @@ class ProjectContextBuilder:
         source_terms = self._term_set(source)
 
         try:
-            symbols = self._extract_symbols(source)
+            symbols = self._extract_symbols(source, relative)
         except (SyntaxError, ValueError):
             symbols = []
 
@@ -229,11 +265,24 @@ class ProjectContextBuilder:
     def build(self, task):
         keywords = self._keywords(task)
         scan = self.scanner.scan()
+        javascript = JavaScriptScanner(self.root).scan()
         warnings = []
         candidates = {}
 
-        # First pass: score every safe, readable Python module.
-        for module, metadata in scan["modules"].items():
+        if javascript.get("status") == "WARN":
+            warnings.append(javascript.get("message", "JavaScript scan was skipped."))
+        for error in javascript.get("syntax_errors", []):
+            warnings.append(
+                f"JavaScript syntax error in {error.get('path', 'unknown file')}"
+            )
+
+        all_modules = dict(scan.get("modules", {}))
+        all_modules.update(javascript.get("modules", {}))
+        all_dependencies = dict(scan.get("dependencies", {}))
+        all_dependencies.update(javascript.get("dependencies", {}))
+
+        # First pass: score every safe, readable Python or JavaScript module.
+        for module, metadata in all_modules.items():
             relative = metadata["path"]
             path = self._safe_path(relative)
 
@@ -266,11 +315,11 @@ class ProjectContextBuilder:
             if item["is_test"] or item["score"] < 6:
                 continue
 
-            for dependency in dependencies.get(module, []):
+            for dependency in all_dependencies.get(module, []):
                 # A useful helper may have no direct keyword match.
                 # Safely load it before assigning its dependency bonus.
                 if dependency not in candidates:
-                    metadata = scan["modules"].get(dependency)
+                    metadata = all_modules.get(dependency)
                     if metadata is None:
                         continue
 
@@ -353,7 +402,20 @@ class ProjectContextBuilder:
 
         impact = {}
         for module in sorted(selected_modules):
-            impact[module] = self.scanner.analyze_impact(module, scan)
+            if module in scan.get("modules", {}):
+                impact[module] = self.scanner.analyze_impact(module, scan)
+            else:
+                module_dependencies = all_dependencies.get(module, [])
+                module_dependents = sorted(
+                    source
+                    for source, targets in all_dependencies.items()
+                    if module in targets
+                )
+                impact[module] = {
+                    "language": "javascript",
+                    "dependencies": module_dependencies,
+                    "dependents": module_dependents,
+                }
 
         return {
             "success": True,
@@ -365,6 +427,6 @@ class ProjectContextBuilder:
             "summary": {
                 "files_selected": len(selected),
                 "bytes_selected": total_bytes,
-                "modules_scanned": scan["summary"]["modules_scanned"],
+                "modules_scanned": len(all_modules),\n                "python_modules_scanned": scan["summary"]["modules_scanned"],\n                "javascript_modules_scanned": javascript.get("files_scanned", 0),
             },
         }
