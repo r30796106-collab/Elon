@@ -134,7 +134,7 @@ Plan recovery marks the execution interrupted and retains its lock. Automatic re
 
 ## Verification
 
-GitHub Actions runs Python compilation and the complete unittest suite on pushes and pull requests using Python 3.12.
+GitHub Actions runs Python compilation and the complete unittest suite on pushes and pull requests using Python 3.12 and Python 3.14.
 
 Run the same checks locally with:
 
