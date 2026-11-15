@@ -76,6 +76,25 @@ class TestPlanApproval(unittest.TestCase):
         self.assertEqual(result["status"], "approved")
         self.assertTrue(self.manager.audit.verify())
 
+    def test_invalid_execution_checkpoint_is_rejected(self):
+        record = self.save()
+        record["execution"] = {
+            "state": "claimed",
+            "started_at": self.manager._now(),
+            "finished_at": None,
+            "completed_steps": [999],
+        }
+        self.manager._write(
+            self.manager._path(record["plan_id"]),
+            record,
+        )
+
+        with self.assertRaisesRegex(
+            PlanApprovalError,
+            "completed-step checkpoint",
+        ):
+            self.manager.get_plan(record["plan_id"])
+
     def test_plan_approval_retries_after_write_failure_without_duplicate_audit(self):
         record = self.save()
         original_write = self.manager._write
