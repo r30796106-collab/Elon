@@ -16,9 +16,9 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 |---:|---|---|---|
 | 23 | Repair failure recovery | **Complete on development branch** | Patch rollback, crash recovery, retry-safe recovery audit outbox, recovery process tests, duplicate prevention, and audit-chain verification. |
 | 24 | Real Gemini integration validation | **Deferred** | Explicitly paused by current project direction. Preserve provider code/configuration; validate only when AI integrations are re-authorized. |
-| 25 | Multi-file code development | **Partial** | Existing-file patch sets support up to eight files with backups, explicit approval, tests, rollback, and crash recovery; an approved two-file end-to-end workflow test now covers the full path. Provider-generated proposal workflow remains paused with AI. |
-| 26 | Automatic debugging and test-fix loop | **Partial** | Read-only Python/JavaScript diagnostics, traceback analysis, registered tests, approval-gated patch verification and rollback exist. Fully automatic fix generation is deferred while AI is paused. |
-| 27 | Python + JavaScript project development | **Partial** | Python and JavaScript files can enter bounded task context; JavaScript symbols/local imports are mapped and syntax is checked with Node parser-only mode. JavaScript edit/build/test proposal support remains to be implemented. |
+| 25 | Multi-file code development | **Partial** | Existing-file patch sets support up to eight files; manual JSON proposals can be submitted offline, then explicitly approved, backed up, tested, and rolled back. A two-file end-to-end test covers the flow. AI-generated proposal creation remains paused. |
+| 26 | Automatic debugging and test-fix loop | **Partial** | Read-only Python/JavaScript diagnostics, traceback analysis, registered test execution, and approval-gated patch verification/rollback exist. Manual offline patch proposals are supported; automatic fix generation remains deferred while AI is paused. |
+| 27 | Python + JavaScript project development | **Partial** | Python and JavaScript files can enter bounded task context; JavaScript symbols/local imports are mapped and syntax is checked with Node parser-only mode. Manual patch proposals can target existing JS files, but JS build/test orchestration and provider-generated edits remain. |
 | 28 | Complete project generation from requirements | **Deferred** | New-file creation is not enabled by the current protected modification policy. Do not bypass that policy; requires a separately approved design. |
 | 29 | Git integration / version control | **Partial** | Read-only Git status, diff, and log CLI. Branch/commit/push operations intentionally remain unavailable until explicit approval design exists. |
 | 30 | Dependency / environment management | **Partial** | Read-only Python/Node runtime and manifest inspection. Installation remains blocked by default and requires explicit approval. |
@@ -31,9 +31,9 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 ## Latest verification
 
 - Development branch: `recovery-partial-audit-2026-11-15`
-- Latest verified commit: `d67ffd06`
-- GitHub Actions run #257: compile and full unittest suite passed; **277 tests passed**; benchmark step passed.
-- JavaScript context/import integration tests passed on the CI Node.js runtime.
+- Latest verified commit: `71db9343`
+- GitHub Actions run #271: compile and full unittest suite passed; **279 tests passed**; benchmark step passed.
+- JavaScript context/import and offline multi-file patch proposal tests passed.
 - CI performance benchmark step passed.
 - Draft PR #1 contains the recovery milestone against `master`.
 - Draft PR #2 contains the follow-up offline planning, diagnostics, Git/environment inspection, and durability work against the development branch.
