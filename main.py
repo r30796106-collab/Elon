@@ -16,6 +16,7 @@ from engine.ai_tool_orchestrator import AIToolOrchestrator
 from engine.ai_task_planner import AITaskPlanner
 from engine.plan_approval import PlanApprovalManager
 from engine.plan_executor import PlanExecutor
+from engine.deterministic_planner import DeterministicTaskPlanner
 from engine.patch_approval import PatchApprovalManager
 from engine.patch_transaction import PatchTransaction
 from engine.patch_proposal_service import PatchProposalService
@@ -457,11 +458,9 @@ def main():
             if task is None:
                 raise ValueError("Task does not exist")
 
-            provider = OpenAIProvider()
-            if not provider.configured():
-                raise RuntimeError("Gemini API key is not configured")
-
-            planner = AITaskPlanner(ROOT, provider)
+            # Deterministic planning is available without Gemini, Aider,
+            # OpenRouter, or any other external AI provider.
+            planner = DeterministicTaskPlanner(ROOT)
             result = planner.plan({
                 "title": task["title"],
                 "description": task["description"],
@@ -470,7 +469,8 @@ def main():
             manager = PlanApprovalManager(ROOT)
             saved = manager.save_plan(args.task_id, result)
 
-            print("PLAN SUBMITTED FOR REVIEW")
+            print("DETERMINISTIC PLAN SUBMITTED FOR REVIEW")
+            print("AI provider calls: DISABLED")
             print("Plan ID:", saved["plan_id"])
             print("Status:", saved["status"])
             print("Plan hash:", saved["plan_hash"])
