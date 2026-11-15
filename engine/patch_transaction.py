@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import json
 import os
@@ -117,6 +118,23 @@ class PatchTransaction:
     def _now():
         return datetime.now(timezone.utc).isoformat()
 
+    @staticmethod
+    def _fsync_directory(directory):
+        descriptor = None
+        try:
+            descriptor = os.open(str(directory), os.O_RDONLY)
+            os.fsync(descriptor)
+        except OSError as error:
+            if error.errno not in (
+                errno.EINVAL,
+                errno.ENOTSUP,
+                errno.EBADF,
+            ):
+                raise
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
     def _set_transaction_status(self, transaction_id, status, error=None):
         with self.engine._connect() as db:
             db.execute(
@@ -214,12 +232,18 @@ class PatchTransaction:
 
                 with open(backup, "xb") as file:
                     file.write(item["target"].read_bytes())
+                    file.flush()
+                    os.fsync(file.fileno())
 
                 if self._hash(backup.read_bytes()) != item["old_hash"]:
                     raise PolicyError("Backup verification failed")
 
                 item["backup"] = backup
                 backup_items.append(item)
+
+            # Make backup file contents and directory entries durable
+            # before any source file can be replaced.
+            self._fsync_directory(engine.backups)
 
             # Stage all replacement files first.
             for item in prepared:
@@ -233,6 +257,8 @@ class PatchTransaction:
                 ) as file:
                     temporary = Path(file.name)
                     file.write(item["content"])
+                    file.flush()
+                    os.fsync(file.fileno())
 
                 os.chmod(temporary, item["old_mode"])
                 item["temporary"] = temporary
@@ -296,6 +322,7 @@ class PatchTransaction:
                     )
 
                 os.replace(item["temporary"], item["target"])
+                self._fsync_directory(item["target"].parent)
                 item["transaction_id"] = transaction_id
                 applied.append(item)
 
