@@ -104,8 +104,10 @@ class ElonCoreTests(unittest.TestCase):
     def test_task_status_rejects_unknown_value(self):
         task_id = self.engine.create_task("Status validation")
 
-        with self.assertRaises(ValueError):
-            self.engine.update_task_status(task_id, "running")
+        for invalid_status in ("running", None, [], {}):
+            with self.subTest(status=invalid_status):
+                with self.assertRaises(ValueError):
+                    self.engine.update_task_status(task_id, invalid_status)
 
         self.assertEqual(self.engine.get_task(task_id)["status"], "pending")
 
