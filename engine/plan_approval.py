@@ -157,18 +157,27 @@ class PlanApprovalManager:
         record = self._load(plan_id)
         execution = record.get("execution")
 
-        if not isinstance(execution, dict):
-            raise PlanApprovalError("Plan has no execution record.")
-
-        if (
-            execution.get("state") != "claimed"
-            or execution.get("finished_at") is not None
-            or not isinstance(execution.get("started_at"), str)
-            or not execution.get("started_at")
-        ):
-            raise PlanApprovalError(
-                "Only an unfinished claimed execution can be recovered."
-            )
+        if execution is None:
+            # A crash may occur after the exclusive lock is created but
+            # before the claimed execution record is persisted.
+            if record.get("status") != "approved":
+                raise PlanApprovalError(
+                    "Only an approved plan with an orphaned execution lock can be recovered."
+                )
+            started_at = None
+        elif isinstance(execution, dict):
+            if (
+                execution.get("state") != "claimed"
+                or execution.get("finished_at") is not None
+                or not isinstance(execution.get("started_at"), str)
+                or not execution.get("started_at")
+            ):
+                raise PlanApprovalError(
+                    "Only an unfinished claimed execution can be recovered."
+                )
+            started_at = execution["started_at"]
+        else:
+            raise PlanApprovalError("Invalid execution record.")
 
         lock = self.directory / f".execution_{plan_id}.lock"
 
@@ -198,7 +207,7 @@ class PlanApprovalManager:
 
         record["execution"] = {
             "state": "interrupted",
-            "started_at": execution["started_at"],
+            "started_at": started_at,
             "finished_at": self._now(),
         }
 
