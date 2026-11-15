@@ -69,13 +69,13 @@ class PatchWorkflowIntegrationTests(unittest.TestCase):
 
     def test_approved_multi_file_patch_workflow(self):
         second = self.engine.workspace / "second.py"
-        second.write_text("total = 5\\n", encoding="utf-8")
+        second.write_text("total = 5\n", encoding="utf-8")
         patches = self.make_patch() + [{
             "path": "second.py",
             "expected_sha256": hashlib.sha256(
                 second.read_bytes()
             ).hexdigest(),
-            "content": "total = 15\\n",
+            "content": "total = 15\n",
         }]
 
         proposal = self.manager.save_proposal(
@@ -95,7 +95,7 @@ class PatchWorkflowIntegrationTests(unittest.TestCase):
         )
 
         self.assertTrue(result["success"])
-        self.assertEqual(self.target.read_text(), "value = 20\\n")
+        self.assertEqual(self.target.read_text(), "value = 20\n")
         self.assertEqual(second.read_text(), "total = 15\\n")
         self.assertEqual(len(result["transaction"]["files"]), 2)
         self.assertTrue(self.engine.audit.verify())
