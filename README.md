@@ -10,6 +10,7 @@ AI-provider integrations remain in the repository for a later, separate mileston
 - Build project context and inspect approved workspace files through a registered tool interface.
 - Run only explicitly registered test suites.
 - Track development tasks and their lifecycle.
+- Generate bounded, deterministic read-only plans without an external AI provider.
 - Prepare and review controlled patch proposals; applying changes is a separate approval-gated action.
 - Keep backups and transaction journals for patch operations.
 - Recover interrupted patch transactions and deliver recovery audit events through a durable outbox.
@@ -23,6 +24,7 @@ Run commands from the repository root:
 ```bash
 python main.py create "Inspect project health" --description "Run diagnostics and review failures."
 python main.py list
+python main.py plan 1
 python main.py diagnose
 python main.py health
 python main.py audit
@@ -46,6 +48,8 @@ Inspect the registered tools and workspace:
 python main.py tools registry
 python main.py tools list
 ```
+
+The `plan` command builds a deterministic, read-only inspection/analysis/test plan and submits it for explicit review. It does not call Gemini or another AI provider. Plan execution still requires approval and never modifies source files.
 
 The `health` command is read-only. It checks required directories, SQLite integrity, the audit hash chain, and patch/proposal consistency. It does not perform recovery or call AI providers.
 
