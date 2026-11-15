@@ -76,6 +76,50 @@ class TestPlanApproval(unittest.TestCase):
         self.assertEqual(result["status"], "approved")
         self.assertTrue(self.manager.audit.verify())
 
+    def test_plan_approval_retries_after_write_failure_without_duplicate_audit(self):
+        record = self.save()
+        original_write = self.manager._write
+        failed = {"value": False}
+
+        def fail_write_once(path, value):
+            if not failed["value"]:
+                failed["value"] = True
+                raise OSError("simulated plan approval write failure")
+            return original_write(path, value)
+
+        from unittest.mock import patch
+        with patch.object(
+            self.manager,
+            "_write",
+            side_effect=fail_write_once,
+        ):
+            with self.assertRaisesRegex(
+                OSError,
+                "plan approval write failure",
+            ):
+                self.manager.approve(record["plan_id"])
+
+            self.assertEqual(
+                self.manager.get_plan(record["plan_id"])["status"],
+                "pending",
+            )
+            approved = self.manager.approve(record["plan_id"])
+
+        self.assertEqual(approved["status"], "approved")
+        audit_lines = [
+            json.loads(line)
+            for line in (self.root / "logs" / "audit.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        matching = [
+            item for item in audit_lines
+            if item.get("event") == "PLAN_APPROVED"
+            and item.get("details", {}).get("plan_id") == record["plan_id"]
+        ]
+        self.assertEqual(len(matching), 1)
+        self.assertTrue(self.manager.audit.verify())
+
     def test_reject_plan(self):
         record = self.save()
         result = self.manager.reject(record["plan_id"])
