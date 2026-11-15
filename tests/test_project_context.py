@@ -159,23 +159,23 @@ class TestProjectContextBuilder(unittest.TestCase):
         src = self.root / "src"
         src.mkdir()
         (src / "helper.mjs").write_text(
-            "export function normalizeProject(value) {\\n"
-            "    return value.trim();\\n"
-            "}\\n",
+            "export function normalizeProject(value) {\n"
+            "    return value.trim();\n"
+            "}\n",
             encoding="utf-8",
         )
         (src / "main.mjs").write_text(
-            'import { normalizeProject } from "./helper.mjs";\\n'
-            "export function buildProject(name) {\\n"
-            "    return normalizeProject(name);\\n"
-            "}\\n",
+            'import { normalizeProject } from "./helper.mjs";\n'
+            "export function buildProject(name) {\n"
+            "    return normalizeProject(name);\n"
+            "}\n",
             encoding="utf-8",
         )
         test_dir = self.root / "test"
         test_dir.mkdir()
         (test_dir / "test_project.mjs").write_text(
-            'import { buildProject } from "../src/main.mjs";\\n'
-            'export function testBuildProject() { return buildProject("ELON"); }\\n',
+            'import { buildProject } from "../src/main.mjs";\n'
+            'export function testBuildProject() { return buildProject("ELON"); }\n',
             encoding="utf-8",
         )
 
