@@ -63,6 +63,8 @@ def main():
     aider.add_argument("--test", choices=("core", "full"), default="core")
 
     sub.add_parser("patches")
+    patch_json = sub.add_parser("patch-propose-json")
+    patch_json.add_argument("json_path")
     patch_show = sub.add_parser("patch-show")
     patch_show.add_argument("proposal_id")
     patch_approve = sub.add_parser("patch-approve")
@@ -304,6 +306,62 @@ def main():
             print("Original source changes: NOT performed")
             if not result["success"]:
                 raise SystemExit(2)
+
+        elif args.command == "patch-propose-json":
+            relative = Path(args.json_path)
+            if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+                raise ValueError("Proposal JSON must be a safe relative workspace path")
+            if relative.parts[0] != "workspace" or relative.suffix.lower() != ".json":
+                raise ValueError("Proposal JSON must be a .json file inside workspace/")
+            proposal_path = (ROOT / relative).resolve(strict=True)
+            workspace_root = (ROOT / "workspace").resolve()
+            proposal_path.relative_to(workspace_root)
+            if proposal_path.is_symlink() or not proposal_path.is_file():
+                raise ValueError("Proposal JSON must be a regular non-symlink file")
+            if proposal_path.stat().st_size > 16 * 1024 * 1024:
+                raise ValueError("Proposal JSON exceeds the 16 MiB limit")
+
+            proposal_data = json.loads(
+                proposal_path.read_text(encoding="utf-8")
+            )
+            if not isinstance(proposal_data, dict) or set(proposal_data) != {
+                "task_id", "summary", "test_name", "patches"
+            }:
+                raise ValueError("Invalid manual patch proposal schema")
+            if type(proposal_data["task_id"]) is not int or proposal_data["task_id"] < 1:
+                raise ValueError("Invalid task ID")
+            if not isinstance(proposal_data["summary"], str):
+                raise ValueError("Proposal summary must be text")
+            if not isinstance(proposal_data["test_name"], str):
+                raise ValueError("Test suite name must be text")
+            if not isinstance(proposal_data["patches"], list) or not (
+                1 <= len(proposal_data["patches"]) <= 8
+            ):
+                raise ValueError("Proposal must contain 1 to 8 file patches")
+
+            for patch in proposal_data["patches"]:
+                if not isinstance(patch, dict) or set(patch) != {
+                    "path", "expected_sha256", "content"
+                }:
+                    raise ValueError("Invalid manual patch entry")
+                if not isinstance(patch["expected_sha256"], str) or not re.fullmatch(
+                    r"[0-9a-f]{64}", patch["expected_sha256"]
+                ):
+                    raise ValueError("Invalid expected SHA-256 hash")
+
+            manager = PatchApprovalManager(engine)
+            saved = manager.save_proposal(
+                proposal_data["task_id"],
+                proposal_data["patches"],
+                summary=proposal_data["summary"],
+                test_name=proposal_data["test_name"],
+            )
+            print("MANUAL PATCH PROPOSAL SAVED")
+            print("AI provider calls: DISABLED")
+            print("Proposal ID:", saved["proposal_id"])
+            print("Status:", saved["status"])
+            print("Files:", len(saved["patches"]))
+            print("Source changes: NOT performed")
 
         elif args.command == "patches":
             manager = PatchApprovalManager(engine)
