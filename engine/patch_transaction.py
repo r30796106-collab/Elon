@@ -322,9 +322,9 @@ class PatchTransaction:
                     )
 
                 os.replace(item["temporary"], item["target"])
-                self._fsync_directory(item["target"].parent)
                 item["transaction_id"] = transaction_id
                 applied.append(item)
+                self._fsync_directory(item["target"].parent)
 
                 with engine._connect() as db:
                     db.execute(
@@ -472,9 +472,12 @@ class PatchTransaction:
                     ) as file:
                         temporary = Path(file.name)
                         file.write(original)
+                        os.chmod(temporary, item["old_mode"])
+                        file.flush()
+                        os.fsync(file.fileno())
 
-                    os.chmod(temporary, item["old_mode"])
                     os.replace(temporary, target)
+                    self._fsync_directory(target.parent)
 
                     transaction_id = item.get("transaction_id")
                     if transaction_id:
