@@ -233,6 +233,53 @@ class TestPlanExecutor(unittest.TestCase):
                 self.assertNotIn("execution", saved)
 
 
+    def test_terminal_execution_reconciles_task_status_without_replay(self):
+        record = self.save_approved()
+        original_update = self.engine.update_task_status
+        update_calls = {"count": 0}
+
+        def fail_once(task_id, status):
+            update_calls["count"] += 1
+            if update_calls["count"] == 1:
+                raise RuntimeError("simulated finalization interruption")
+            return original_update(task_id, status)
+
+        with patch.object(
+            self.engine,
+            "update_task_status",
+            side_effect=fail_once,
+        ), patch.object(
+            self.executor,
+            "_execute_step",
+            wraps=self.executor._execute_step,
+        ) as execute_step:
+            with self.assertRaises(RuntimeError):
+                self.executor.execute(record["plan_id"])
+
+            saved = self.manager.get_plan(record["plan_id"])
+            self.assertEqual(saved["execution"]["state"], "completed")
+            self.assertEqual(
+                self.engine.get_task(self.task_id)["status"],
+                "pending",
+            )
+            self.assertEqual(execute_step.call_count, 1)
+
+            with self.assertRaises(PlanExecutionError):
+                self.executor.execute(record["plan_id"])
+
+            self.assertEqual(execute_step.call_count, 1)
+
+        self.assertEqual(
+            self.engine.get_task(self.task_id)["status"],
+            "completed",
+        )
+        events = [
+            item["event"]
+            for item in self.engine.audit.read_all()
+        ]
+        self.assertIn("PLAN_TASK_STATUS_RECONCILED", events)
+        self.assertTrue(self.engine.audit.verify())
+
     def test_unapproved_plan_cannot_execute(self):
         plan = self.make_plan()
         record = self.manager.save_plan(self.task_id, plan)
