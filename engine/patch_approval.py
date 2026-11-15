@@ -36,6 +36,63 @@ class PatchApprovalManager:
     def _now():
         return datetime.now(timezone.utc).isoformat()
 
+    def _fsync_audit_log(self):
+        path = self.engine.audit.path
+        with path.open("rb") as handle:
+            os.fsync(handle.fileno())
+
+        descriptor = None
+        try:
+            descriptor = os.open(str(path.parent), os.O_RDONLY)
+            os.fsync(descriptor)
+        except OSError as error:
+            if error.errno not in (
+                errno.EINVAL,
+                errno.ENOTSUP,
+                errno.EBADF,
+            ):
+                raise
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+    def _audit_contains_proposal_event(self, event_name, proposal_id):
+        path = self.engine.audit.path
+        if not path.exists():
+            return False
+
+        if not self.engine.audit.verify():
+            raise PatchApprovalError("Audit log integrity check failed")
+
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line_number, line in enumerate(handle, start=1):
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        raise PatchApprovalError(
+                            f"Audit log is unreadable at line {line_number}"
+                        ) from None
+
+                    if not isinstance(item, dict):
+                        raise PatchApprovalError(
+                            f"Audit record {line_number} is invalid"
+                        )
+
+                    details = item.get("details")
+                    if (
+                        item.get("event") == event_name
+                        and isinstance(details, dict)
+                        and details.get("proposal_id") == proposal_id
+                    ):
+                        return True
+        except OSError as error:
+            raise PatchApprovalError(
+                f"Audit log could not be read: {error}"
+            ) from None
+
+        return False
+
     @staticmethod
     def _digest(data):
         raw = json.dumps(
@@ -365,6 +422,7 @@ class PatchApprovalManager:
                 "files": len(prepared),
             },
         )
+        self._fsync_audit_log()
 
         return record
 
@@ -428,22 +486,33 @@ class PatchApprovalManager:
     def _decide(self, proposal_id, decision):
         with self._proposal_lock(proposal_id):
             record = self._read(proposal_id)
+            event_name = "PATCH_PROPOSAL_" + decision.upper()
 
-            if record["status"] != "pending":
+            if record["status"] not in ("pending", decision):
                 raise PatchApprovalError("Proposal is no longer pending")
 
-            record["status"] = decision
-            record["decided_at"] = self._now()
-            self._write(self._path(proposal_id), record)
+            # Make the decision event durable first. If persisting the proposal
+            # fails or the process stops, a retry can detect this event and
+            # finish the state transition without writing a duplicate.
+            if not self._audit_contains_proposal_event(
+                event_name,
+                proposal_id,
+            ):
+                self.engine.audit.append(
+                    event_name,
+                    {
+                        "proposal_id": proposal_id,
+                        "task_id": record["task_id"],
+                        "patch_hash": record["proposal_hash"],
+                    },
+                )
+            self._fsync_audit_log()
 
-            self.engine.audit.append(
-                "PATCH_PROPOSAL_" + decision.upper(),
-                {
-                    "proposal_id": proposal_id,
-                    "task_id": record["task_id"],
-                    "patch_hash": record["proposal_hash"],
-                },
-            )
+            if record["status"] == "pending":
+                record["status"] = decision
+                record["decided_at"] = self._now()
+                self._write(self._path(proposal_id), record)
+
             return record
 
     def approve(self, proposal_id):
