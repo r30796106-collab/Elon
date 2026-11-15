@@ -214,16 +214,26 @@ class ProjectContextBuilder:
         words = re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", text.lower())
         return {self._normalize_term(word) for word in words}
 
-    def _score_candidate(self, module, relative, source, keywords):
+    def _score_candidate(
+        self,
+        module,
+        relative,
+        source,
+        keywords,
+        precomputed_symbols=None,
+    ):
         """Score path, identifiers, source content and test relevance."""
         task_terms = {self._normalize_term(word) for word in keywords}
         path_terms = self._term_set(module + " " + relative)
         source_terms = self._term_set(source)
 
-        try:
-            symbols = self._extract_symbols(source, relative)
-        except (SyntaxError, ValueError):
-            symbols = []
+        if precomputed_symbols is not None:
+            symbols = precomputed_symbols
+        else:
+            try:
+                symbols = self._extract_symbols(source, relative)
+            except (SyntaxError, ValueError):
+                symbols = []
 
         symbol_terms = set()
         for symbol in symbols:
@@ -305,7 +315,11 @@ class ProjectContextBuilder:
                 continue
 
             item = self._score_candidate(
-                module, relative, source, keywords
+                module,
+                relative,
+                source,
+                keywords,
+                metadata.get("symbols"),
             )
 
             if item["score"] > 0:
@@ -337,7 +351,11 @@ class ProjectContextBuilder:
                         continue
 
                     candidates[dependency] = self._score_candidate(
-                        dependency, relative, helper_source, keywords
+                        dependency,
+                        relative,
+                        helper_source,
+                        keywords,
+                        metadata.get("symbols"),
                     )
 
                 dependency_scores[dependency] = (
