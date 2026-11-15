@@ -340,6 +340,23 @@ class ProjectScaffolder:
             )
         ):
             raise ScaffoldingError("Scaffold proposal metadata is invalid.")
+
+        approved_at = record.get("approved_at")
+        if approved_at is not None and not isinstance(approved_at, str):
+            raise ScaffoldingError("Scaffold approval timestamp is invalid.")
+        if (
+            record["status"] in ("approved", "applying", "recovery_required", "applied")
+            and not approved_at
+        ):
+            raise ScaffoldingError("Scaffold approval evidence is missing.")
+        if record["status"] == "pending" and approved_at is not None:
+            raise ScaffoldingError("Pending scaffold has approval metadata.")
+
+        applied_at = record.get("applied_at")
+        if applied_at is not None and not isinstance(applied_at, str):
+            raise ScaffoldingError("Scaffold application timestamp is invalid.")
+        if record["status"] == "applied" and not applied_at:
+            raise ScaffoldingError("Applied scaffold is missing its timestamp.")
         return record
 
     def list_proposals(self):
@@ -564,6 +581,8 @@ class ProjectScaffolder:
         record = self._load(proposal_id)
         if record["status"] == "applied":
             return record
+        if not self._audit_contains("PROJECT_SCAFFOLD_APPROVED", proposal_id):
+            raise ScaffoldingError("Scaffold approval audit evidence is missing.")
         return self._apply_record(record, recovery=False)
 
     def recover(self, proposal_id, confirm_stopped=False):
@@ -578,6 +597,8 @@ class ProjectScaffolder:
             raise ScaffoldingError(
                 "Only an interrupted scaffold application can be recovered."
             )
+        if not self._audit_contains("PROJECT_SCAFFOLD_APPROVED", proposal_id):
+            raise ScaffoldingError("Scaffold approval audit evidence is missing.")
         recovered = self._apply_record(record, recovery=True)
         self._audit("PROJECT_SCAFFOLD_RECOVERED", {
             "proposal_id": proposal_id,
