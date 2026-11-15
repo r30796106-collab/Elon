@@ -31,10 +31,12 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 ## Latest verification
 
 - Development branch: `recovery-partial-audit-2026-11-15`
-- Latest source commit: `712a73523e2c51c562aba7fc5a2964220e20810d`
-- GitHub Actions push run #328 and pull-request validation run #329 both passed.
-- Compile check passed; full unittest suite: **295 tests passed**; read-only benchmark passed.
-- Latest benchmark (3 iterations): Python project scan median 0.145172s (70 modules); JavaScript scan 0.000506s; health check 0.000410s; context build 0.195745s (12 files selected). The repository has no JavaScript modules in this benchmark; dedicated fixture tests verify JavaScript context and local import discovery.
+- Latest source commit: `0111fc294aaf3e7a69e04bb8a08c4fa05524ded1`
+- GitHub Actions run #332 passed on both Python 3.12 and Python 3.14.
+- Each runtime passed compilation, the full unittest suite (**295 tests**), and the read-only performance benchmark.
+- Python 3.12 benchmark medians (3 iterations): project scan 0.145172s; JavaScript scan 0.000506s; health check 0.000410s; context build 0.195745s.
+- Python 3.14 benchmark medians (3 iterations): project scan 0.242168s; JavaScript scan 0.000734s; health check 0.000658s; context build 0.322711s. Runtime-specific timings are recorded separately and are not compared as a like-for-like optimization result.
+- Both benchmark runs scanned 70 Python modules and selected 12 context files. The repository has no JavaScript modules in this benchmark; dedicated fixture tests verify JavaScript context and local import discovery.
 - JavaScript context/import discovery works without Node.js; Node.js syntax checking remains optional and parser-only.
 - Draft PR #1 contains the recovery milestone against `master`.
 - Draft PR #2 contains offline planning, diagnostics, Git/environment inspection, JavaScript context discovery, and durability work.
