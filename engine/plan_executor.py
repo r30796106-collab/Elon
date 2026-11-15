@@ -175,6 +175,10 @@ class PlanExecutor:
                 "state": "claimed",
                 "started_at": self.manager._now(),
                 "finished_at": None,
+                "completed_steps": [],
+                "failed_step": None,
+                "last_checkpoint_at": None,
+                "last_checkpoint_state": None,
             }
 
             self.manager._write(
@@ -188,6 +192,41 @@ class PlanExecutor:
             except OSError:
                 pass
             raise
+
+    def _save_step_checkpoint(
+        self,
+        record,
+        step_id,
+        state,
+        error_type=None,
+    ):
+        execution = record.get("execution")
+        if not isinstance(execution, dict):
+            raise PlanExecutionError("Execution checkpoint is unavailable.")
+
+        completed = execution.get("completed_steps", [])
+        if not isinstance(completed, list):
+            raise PlanExecutionError("Execution checkpoint is invalid.")
+
+        if state == "completed":
+            if step_id not in completed:
+                completed.append(step_id)
+            execution["last_completed_step"] = step_id
+        elif state == "failed":
+            execution["failed_step"] = step_id
+        else:
+            raise PlanExecutionError("Invalid checkpoint state.")
+
+        execution["completed_steps"] = completed
+        execution["last_checkpoint_at"] = self.manager._now()
+        execution["last_checkpoint_state"] = state
+        if error_type:
+            execution["last_error_type"] = str(error_type)[:100]
+
+        self.manager._write(
+            self.manager._path(record["plan_id"]),
+            record,
+        )
 
     PREVIEW_CHARS = 1200
 
@@ -441,9 +480,20 @@ class PlanExecutor:
                             **detail,
                             "error": "Registered test suite failed",
                         })
+                        self._save_step_checkpoint(
+                            record,
+                            step["id"],
+                            "failed",
+                            "RegisteredTestFailure",
+                        )
                         break
 
                     self._audit("PLAN_STEP_COMPLETED", detail)
+                    self._save_step_checkpoint(
+                        record,
+                        step["id"],
+                        "completed",
+                    )
 
                 except Exception as error:
                     state = "failed"
@@ -452,6 +502,12 @@ class PlanExecutor:
                         **detail,
                         "error": type(error).__name__,
                     })
+                    self._save_step_checkpoint(
+                        record,
+                        step["id"],
+                        "failed",
+                        type(error).__name__,
+                    )
 
                     results.append({
                         "step_id": step["id"],
@@ -466,11 +522,10 @@ class PlanExecutor:
             # Keep the durable claim non-terminal so explicit interruption
             # recovery can handle it; do not mislabel the task as failed.
             if started_event_written:
-                record["execution"] = {
-                    "state": state,
-                    "started_at": record["execution"]["started_at"],
-                    "finished_at": self.manager._now(),
-                }
+                execution_record = record.get("execution", {})
+                execution_record["state"] = state
+                execution_record["finished_at"] = self.manager._now()
+                record["execution"] = execution_record
 
                 self.manager._write(
                     self.manager._path(plan_id),
