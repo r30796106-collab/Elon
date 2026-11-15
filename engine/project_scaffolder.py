@@ -579,6 +579,8 @@ class ProjectScaffolder:
 
     def apply(self, proposal_id):
         record = self._load(proposal_id)
+        if record["status"] == "pending":
+            raise ScaffoldingError("Scaffold proposal requires explicit approval.")
         if record["status"] == "applied":
             return record
         if not self._audit_contains("PROJECT_SCAFFOLD_APPROVED", proposal_id):
