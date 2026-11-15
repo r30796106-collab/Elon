@@ -11,6 +11,7 @@ This is an internal engineering review, not an independent security certificatio
 - Git CLI integration is read-only; it does not stage, commit, switch, reset, push, or fetch.
 - JavaScript diagnostics use Node `--check` only; source files are not executed.
 - Environment inspection reads manifests and runtime versions; it does not install packages or use the network.
+- Project scaffolding creates new files only under `workspace/generated_projects/` after explicit approval; it refuses existing destinations, uses exclusive file creation, records hashes in a manifest, and supports confirmed recovery without deleting or overwriting user files.
 
 ### Path and file safety
 - Project operations use configured project roots and protected-path rules.
