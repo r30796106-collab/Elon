@@ -105,3 +105,5 @@ python -m unittest discover -s tests -v
 - `workspace/`: managed project files
 - `logs/`: execution audit records
 - `backups/`: recovery data
+
+<!-- TEMPORARY BLUE ANT PLAN-LINKED WORKER SMOKE TEST; DO NOT MERGE -->
