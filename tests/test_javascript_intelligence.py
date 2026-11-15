@@ -95,7 +95,8 @@ class JavaScriptScannerTests(unittest.TestCase):
             report = JavaScriptScanner(self.root).scan()
 
         self.assertEqual(report["status"], "WARN")
-        self.assertEqual(report["files_scanned"], 0)
+        self.assertEqual(report["files_scanned"], 1)
+        self.assertIn("src/main", report["modules"])
         self.assertTrue(report["warnings"])
         self.assertIn(
             "JavaScript syntax-check time budget reached",
