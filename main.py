@@ -115,6 +115,8 @@ def main():
     plan_command.add_argument("task_id", type=int)
 
     sub.add_parser("plans")
+    plan_progress = sub.add_parser("plan-progress")
+    plan_progress.add_argument("plan_id")
 
     approve_command = sub.add_parser("plan-approve")
     approve_command.add_argument("plan_id")
@@ -510,6 +512,16 @@ def main():
             manager = PlanApprovalManager(ROOT)
             records = manager.list_plans()
             print(json.dumps(records, ensure_ascii=False, indent=2))
+
+        elif args.command == "plan-progress":
+            manager = PlanApprovalManager(ROOT)
+            record = manager.get_plan(args.plan_id)
+            print(json.dumps({
+                "plan_id": record["plan_id"],
+                "task_id": record["task_id"],
+                "status": record["status"],
+                "execution": record.get("execution"),
+            }, ensure_ascii=False, indent=2))
 
         elif args.command == "approve":
             manager = PlanApprovalManager(ROOT)
