@@ -53,6 +53,16 @@ The `plan` command builds a deterministic, read-only inspection/analysis/test pl
 
 The `health` command is read-only. It checks required directories, SQLite integrity, the audit hash chain, and patch/proposal consistency. It does not perform recovery or call AI providers.
 
+## Deterministic plan workflow
+
+1. Create a task and note its task ID.
+2. Generate a deterministic, read-only plan: `python main.py plan TASK_ID`.
+3. Review the saved plan with `python main.py plans`.
+4. Approve the exact plan ID: `python main.py plan-approve PLAN_ID`.
+5. Execute the approved read-only plan: `python main.py execute-plan PLAN_ID`.
+
+Plan execution is bounded to inspection, analysis, and registered tests. It cannot modify project files. A separate controlled patch proposal and approval workflow is required for source changes.
+
 ## Controlled patch workflow
 
 Patch proposal generation, review, approval, and application are separate operations:
