@@ -192,7 +192,7 @@ These commands do not stage, commit, switch branches, reset, push, or fetch.
 
 - AI-driven proposal generation and automatic debugging are paused by project direction.
 - JavaScript support currently covers bounded syntax diagnostics and local import mapping; JavaScript source modification is not yet enabled.
-- New-file project generation is not enabled by the current modification policy.
+- Arbitrary new-file creation is not enabled through the patch workflow. The separate scaffold workflow can create only its fixed Python/JavaScript starter templates under `workspace/generated_projects/`, after explicit approval, with no-overwrite checks and recovery.
 - Git write operations and dependency installation are intentionally unavailable.
 - Long-running plan progress is checkpointed and inspectable, but automatic background scheduling and automatic resume are not enabled.
 - Android/Termux validation remains a required final acceptance step; CI results are not a substitute for device validation.
