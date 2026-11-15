@@ -176,6 +176,26 @@ class PatchRecoveryTests(unittest.TestCase):
                 confirm_stopped=True,
             )
 
+    def test_invalid_file_state_rejected_before_restoration(self):
+        self.create_interrupted()
+
+        with self.engine._connect() as db:
+            db.execute(
+                """UPDATE patch_transaction_files
+                   SET state = 'corrupted'
+                   WHERE transaction_id = ? AND ordinal = 0""",
+                (self.transaction_id,),
+            )
+
+        with self.assertRaisesRegex(PolicyError, "Invalid transaction file state"):
+            self.transaction.recover(
+                self.transaction_id,
+                confirm_stopped=True,
+            )
+
+        self.assertEqual(self.a.read_bytes(), self.new_a)
+        self.assertEqual(self.b.read_bytes(), self.new_b)
+
 
 if __name__ == "__main__":
     unittest.main()

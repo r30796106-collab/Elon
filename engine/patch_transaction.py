@@ -468,6 +468,9 @@ class PatchTransaction:
 
         # Validate EVERY target and backup before restoring ANY file.
         for ordinal, relative_path, backup_name, old_hash, new_hash, old_mode, state in rows:
+            if state not in ("pending", "replacing", "replaced", "rolled_back"):
+                raise PolicyError("Invalid transaction file state")
+
             if (
                 not isinstance(relative_path, str)
                 or not isinstance(backup_name, str)
