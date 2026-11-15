@@ -268,6 +268,45 @@ class TestPlanExecutor(unittest.TestCase):
         )
         self.assertTrue(self.engine.audit.verify())
 
+    def test_started_audit_failure_keeps_claim_nonterminal(self):
+        record = self.save_approved()
+        original_append = self.engine.audit.append
+
+        def fail_started(event, details):
+            if event == "PLAN_EXECUTION_STARTED":
+                raise OSError("simulated start audit failure")
+            return original_append(event, details)
+
+        with patch.object(
+            self.engine.audit,
+            "append",
+            side_effect=fail_started,
+        ), patch.object(
+            self.executor,
+            "_execute_step",
+            wraps=self.executor._execute_step,
+        ) as execute_step:
+            with self.assertRaises(OSError):
+                self.executor.execute(record["plan_id"])
+
+            self.assertEqual(execute_step.call_count, 0)
+
+        saved = self.manager.get_plan(record["plan_id"])
+        self.assertEqual(saved["execution"]["state"], "claimed")
+        self.assertIsNone(saved["execution"]["finished_at"])
+        self.assertTrue(self.lock_path(record["plan_id"]).exists())
+        self.assertEqual(
+            self.engine.get_task(self.task_id)["status"],
+            "pending",
+        )
+
+        audit_text = (self.root / "logs" / "audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("PLAN_EXECUTION_STARTED", audit_text)
+        self.assertNotIn("PLAN_EXECUTION_FINISHED", audit_text)
+        self.assertTrue(self.engine.audit.verify())
+
     def test_finished_audit_event_retries_without_replaying_steps(self):
         record = self.save_approved()
         original_append = self.engine.audit.append
