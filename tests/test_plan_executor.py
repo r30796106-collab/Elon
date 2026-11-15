@@ -329,6 +329,51 @@ class TestPlanExecutor(unittest.TestCase):
         )
         self.assertTrue(self.engine.audit.verify())
 
+    def test_started_audit_sync_failure_keeps_claim_recoverable(self):
+        record = self.save_approved()
+        failed = {"value": False}
+        original_sync = self.executor._fsync_audit_log
+
+        def fail_sync_once():
+            if not failed["value"]:
+                failed["value"] = True
+                raise OSError("simulated STARTED audit sync failure")
+            return original_sync()
+
+        with patch.object(
+            self.executor,
+            "_fsync_audit_log",
+            side_effect=fail_sync_once,
+        ), patch.object(
+            self.executor,
+            "_execute_step",
+            wraps=self.executor._execute_step,
+        ) as execute_step:
+            with self.assertRaisesRegex(
+                OSError,
+                "STARTED audit sync failure",
+            ):
+                self.executor.execute(record["plan_id"])
+            self.assertEqual(execute_step.call_count, 0)
+
+        saved = self.manager.get_plan(record["plan_id"])
+        self.assertEqual(saved["execution"]["state"], "claimed")
+        self.assertIsNone(saved["execution"]["finished_at"])
+        self.assertTrue(self.lock_path(record["plan_id"]).exists())
+
+        recovered = self.manager.mark_interrupted(
+            record["plan_id"],
+            confirm_stopped=True,
+        )
+        self.assertEqual(recovered["execution"]["state"], "interrupted")
+        audit_text = (self.root / "logs" / "audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(audit_text.count("PLAN_EXECUTION_STARTED"), 1)
+        self.assertEqual(audit_text.count("PLAN_EXECUTION_INTERRUPTED"), 1)
+        self.assertNotIn("PLAN_EXECUTION_FINISHED", audit_text)
+        self.assertTrue(self.engine.audit.verify())
+
     def test_started_audit_append_then_raise_recovers_without_replay(self):
         record = self.save_approved()
         original_append = self.engine.audit.append
