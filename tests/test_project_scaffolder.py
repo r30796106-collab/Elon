@@ -153,6 +153,52 @@ class ProjectScaffolderTests(unittest.TestCase):
         self.assertTrue((target / "main.py").is_file())
         self.assertTrue(self.scaffolder.audit.verify())
 
+    def test_concurrent_apply_is_serialized_per_proposal(self):
+        import threading
+
+        record = self.propose()
+        self.scaffolder.approve(record["proposal_id"])
+        started = threading.Event()
+        release = threading.Event()
+        original_apply_record = self.scaffolder._apply_record
+        outcomes = []
+
+        def blocked_apply(saved, recovery=False):
+            started.set()
+            if not release.wait(timeout=5):
+                raise TimeoutError("test did not release scaffold worker")
+            return original_apply_record(saved, recovery=recovery)
+
+        self.scaffolder._apply_record = blocked_apply
+
+        def first_worker():
+            try:
+                outcomes.append(
+                    ("first", self.scaffolder.apply(record["proposal_id"]))
+                )
+            except Exception as exc:
+                outcomes.append(("first_error", exc))
+
+        worker = threading.Thread(target=first_worker)
+        worker.start()
+        self.assertTrue(started.wait(timeout=3))
+        try:
+            with self.assertRaisesRegex(
+                ScaffoldingError, "already being applied or recovered"
+            ):
+                self.scaffolder.apply(record["proposal_id"])
+        finally:
+            release.set()
+            worker.join(timeout=5)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0][0], "first")
+        self.assertEqual(outcomes[0][1]["status"], "applied")
+        self.assertEqual(
+            self.scaffolder.verify(record["proposal_id"])["status"], "PASS"
+        )
+
     def test_workspace_symlink_is_rejected(self):
         outside = self.root / "outside"
         outside.mkdir()
