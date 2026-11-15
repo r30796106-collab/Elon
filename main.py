@@ -16,6 +16,7 @@ from engine.ai_tool_orchestrator import AIToolOrchestrator
 from engine.plan_approval import PlanApprovalManager
 from engine.plan_executor import PlanExecutor
 from engine.deterministic_planner import DeterministicTaskPlanner
+from engine.git_manager import GitManager
 from engine.patch_approval import PatchApprovalManager
 from engine.patch_transaction import PatchTransaction
 from engine.patch_proposal_service import PatchProposalService
@@ -84,6 +85,17 @@ def main():
     sub.add_parser("test")
     sub.add_parser("audit")
     sub.add_parser("status")
+    git_command = sub.add_parser("git")
+    git_sub = git_command.add_subparsers(
+        dest="git_action",
+        required=True,
+    )
+    git_sub.add_parser("status")
+    git_diff = git_sub.add_parser("diff")
+    git_diff.add_argument("--staged", action="store_true")
+    git_diff.add_argument("--full", action="store_true")
+    git_log = git_sub.add_parser("log")
+    git_log.add_argument("--limit", type=int, default=10)
     sub.add_parser("usage")
     sub.add_parser("health")
 
@@ -553,6 +565,21 @@ def main():
             print("Execution:", record["execution"]["state"])
             print("Replay: BLOCKED (lock retained)")
             print("Automatic resume: DISABLED")
+
+        elif args.command == "git":
+            manager = GitManager(ROOT)
+            if args.git_action == "status":
+                result = manager.status()
+            elif args.git_action == "diff":
+                result = manager.diff(
+                    staged=args.staged,
+                    stat_only=not args.full,
+                )
+            elif args.git_action == "log":
+                result = manager.log(limit=args.limit)
+            else:
+                raise ValueError("Unsupported Git action")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
 
         elif args.command == "usage":
             print(UsageTracker().report())
