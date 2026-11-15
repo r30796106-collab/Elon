@@ -13,8 +13,8 @@ class JavaScriptScanner:
 
     MAX_FILES = 500
     MAX_FILE_BYTES = 256 * 1024
-    CHECK_TIMEOUT_SECONDS = 10
-    MAX_TOTAL_CHECK_SECONDS = 30
+    CHECK_TIMEOUT_SECONDS = 3
+    MAX_TOTAL_CHECK_SECONDS = 10
     EXTENSIONS = {".js", ".mjs", ".cjs"}
     SKIP_DIRS = {
         ".git", ".venv", "venv", "__pycache__", "node_modules",
