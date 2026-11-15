@@ -62,7 +62,11 @@ class PatchTransaction:
         return found
 
     def _flush_recovery_audit_outbox(self):
+        # Serialize delivery across processes. Without a write reservation,
+        # two starters can both observe a pending row, both check the audit
+        # file before either append, and emit duplicate recovery events.
         with self.engine._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             pending = db.execute(
                 """SELECT transaction_id, details_json
                    FROM patch_recovery_audit_outbox
@@ -70,21 +74,20 @@ class PatchTransaction:
                    ORDER BY created_at, transaction_id"""
             ).fetchall()
 
-        for transaction_id, details_json in pending:
-            try:
-                details = json.loads(details_json)
-            except (TypeError, json.JSONDecodeError) as error:
-                raise PolicyError(
-                    "Recovery audit outbox record is invalid"
-                ) from error
+            for transaction_id, details_json in pending:
+                try:
+                    details = json.loads(details_json)
+                except (TypeError, json.JSONDecodeError) as error:
+                    raise PolicyError(
+                        "Recovery audit outbox record is invalid"
+                    ) from error
 
-            if not self._audit_contains_recovery_event(transaction_id):
-                self.engine.audit.append(
-                    "PATCH_TRANSACTION_RECOVERED",
-                    details,
-                )
+                if not self._audit_contains_recovery_event(transaction_id):
+                    self.engine.audit.append(
+                        "PATCH_TRANSACTION_RECOVERED",
+                        details,
+                    )
 
-            with self.engine._connect() as db:
                 cursor = db.execute(
                     """UPDATE patch_recovery_audit_outbox
                        SET delivered_at = ?
@@ -95,6 +98,7 @@ class PatchTransaction:
                     raise PolicyError(
                         "Recovery audit outbox delivery state conflict"
                     )
+
                 # The outbox is created only after every file has been restored
                 # and the transaction was finalized. If delivery previously
                 # failed, startup replay must also reconcile the journal status.
