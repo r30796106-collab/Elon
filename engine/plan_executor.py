@@ -252,6 +252,11 @@ class PlanExecutor:
         if task is None or task.get("id") != task_id:
             raise PlanExecutionError("Plan task does not exist.")
 
+        if task.get("status") not in ("pending", "in_progress"):
+            raise PlanExecutionError(
+                "Plan task is not active; only pending or in-progress tasks can execute."
+            )
+
         plan = record.get("plan")
 
         if record.get("plan_hash") != self.manager._digest(plan):
