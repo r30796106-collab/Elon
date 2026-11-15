@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import stat
 import tempfile
@@ -15,6 +16,81 @@ class PatchTransaction:
 
     def __init__(self, engine):
         self.engine = engine
+        with self.engine._connect() as db:
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS patch_recovery_audit_outbox (
+                    transaction_id TEXT PRIMARY KEY,
+                    task_id INTEGER NOT NULL,
+                    details_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    delivered_at TEXT
+                )"""
+            )
+        self._flush_recovery_audit_outbox()
+
+    def _audit_contains_recovery_event(self, transaction_id):
+        path = self.engine.audit.path
+        if not path.exists():
+            return False
+
+        with path.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError as error:
+                    raise PolicyError(
+                        f"Audit log is unreadable at line {line_number}"
+                    ) from error
+
+                if not isinstance(record, dict):
+                    raise PolicyError(
+                        f"Audit record {line_number} is invalid"
+                    )
+
+                details = record.get("details")
+                if (
+                    record.get("event") == "PATCH_TRANSACTION_RECOVERED"
+                    and isinstance(details, dict)
+                    and details.get("transaction_id") == transaction_id
+                ):
+                    return True
+
+        return False
+
+    def _flush_recovery_audit_outbox(self):
+        with self.engine._connect() as db:
+            pending = db.execute(
+                """SELECT transaction_id, details_json
+                   FROM patch_recovery_audit_outbox
+                   WHERE delivered_at IS NULL
+                   ORDER BY created_at, transaction_id"""
+            ).fetchall()
+
+        for transaction_id, details_json in pending:
+            try:
+                details = json.loads(details_json)
+            except (TypeError, json.JSONDecodeError) as error:
+                raise PolicyError(
+                    "Recovery audit outbox record is invalid"
+                ) from error
+
+            if not self._audit_contains_recovery_event(transaction_id):
+                self.engine.audit.append(
+                    "PATCH_TRANSACTION_RECOVERED",
+                    details,
+                )
+
+            with self.engine._connect() as db:
+                cursor = db.execute(
+                    """UPDATE patch_recovery_audit_outbox
+                       SET delivered_at = ?
+                       WHERE transaction_id = ? AND delivered_at IS NULL""",
+                    (self._now(), transaction_id),
+                )
+                if cursor.rowcount != 1:
+                    raise PolicyError(
+                        "Recovery audit outbox delivery state conflict"
+                    )
 
     @staticmethod
     def _hash(data):
@@ -604,6 +680,14 @@ class PatchTransaction:
                     if cursor.rowcount != 1:
                         raise PolicyError("Recovery journal file update failed")
 
+            audit_details = {
+                "transaction_id": transaction_id,
+                "task_id": task_id,
+                "files": len(validated),
+                "restored_files": restored,
+                "repair_counted": repair_counted,
+                "repair_attempts_incremented": False,
+            }
             with engine._connect() as db:
                 cursor = db.execute(
                     """UPDATE patch_transactions
@@ -615,17 +699,21 @@ class PatchTransaction:
                 if cursor.rowcount != 1:
                     raise PolicyError("Recovery transaction state conflict")
 
-            engine.audit.append(
-                "PATCH_TRANSACTION_RECOVERED",
-                {
-                    "transaction_id": transaction_id,
-                    "task_id": task_id,
-                    "files": len(validated),
-                    "restored_files": restored,
-                    "repair_counted": repair_counted,
-                    "repair_attempts_incremented": False,
-                },
-            )
+                db.execute(
+                    """INSERT OR IGNORE INTO patch_recovery_audit_outbox
+                       (transaction_id, task_id, details_json, created_at, delivered_at)
+                       VALUES (?, ?, ?, ?, NULL)""",
+                    (
+                        transaction_id,
+                        task_id,
+                        json.dumps(audit_details, sort_keys=True),
+                        self._now(),
+                    ),
+                )
+
+            # The SQLite outbox survives a crash between journal finalization
+            # and audit append; replay is idempotent by transaction ID.
+            self._flush_recovery_audit_outbox()
 
             return {
                 "transaction_id": transaction_id,
