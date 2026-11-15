@@ -36,6 +36,23 @@ Performance baseline (read-only):
 python main.py benchmark --iterations 3
 ```
 
+## Project scaffolding
+
+ELON can generate a minimal Python or JavaScript project template from a project name, description, and requirements text. It creates a pending proposal first; no project files are written until explicit approval.
+
+```bash
+python main.py scaffold-propose demo_app --language python --description "A small demo application" --requirements "Provide a main entry point and smoke test."
+python main.py scaffold-list
+python main.py scaffold-approve PROPOSAL_ID
+python main.py scaffold-apply PROPOSAL_ID
+```
+
+Generated projects are restricted to `workspace/generated_projects/`. Existing destinations are never overwritten. No packages are installed and generated code is not executed. If application is interrupted, confirm the original process has stopped before recovery:
+
+```bash
+python main.py scaffold-recover PROPOSAL_ID --confirm-stopped
+```
+
 ## Deterministic task workflow
 
 1. Create a task:
