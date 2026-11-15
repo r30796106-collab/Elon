@@ -18,21 +18,22 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 | 24 | Real Gemini integration validation | **Deferred** | Explicitly paused by current project direction. Preserve provider code/configuration; validate only when AI integrations are re-authorized. |
 | 25 | Multi-file code development | **Partial** | Existing-file patch sets support up to eight files with backups, explicit approval, tests, rollback, and crash recovery; an approved two-file end-to-end workflow test now covers the full path. Provider-generated proposal workflow remains paused with AI. |
 | 26 | Automatic debugging and test-fix loop | **Partial** | Read-only Python/JavaScript diagnostics, traceback analysis, registered tests, approval-gated patch verification and rollback exist. Fully automatic fix generation is deferred while AI is paused. |
-| 27 | Python + JavaScript project development | **Partial** | Python project context/planning plus bounded JavaScript syntax checks and local import mapping. JavaScript edit/build/test proposal support remains to be implemented. |
+| 27 | Python + JavaScript project development | **Partial** | Python and JavaScript files can enter bounded task context; JavaScript symbols/local imports are mapped and syntax is checked with Node parser-only mode. JavaScript edit/build/test proposal support remains to be implemented. |
 | 28 | Complete project generation from requirements | **Deferred** | New-file creation is not enabled by the current protected modification policy. Do not bypass that policy; requires a separately approved design. |
 | 29 | Git integration / version control | **Partial** | Read-only Git status, diff, and log CLI. Branch/commit/push operations intentionally remain unavailable until explicit approval design exists. |
 | 30 | Dependency / environment management | **Partial** | Read-only Python/Node runtime and manifest inspection. Installation remains blocked by default and requires explicit approval. |
 | 31 | Long-running task management | **Partial** | Persistent task lifecycle, durable per-step plan checkpoints, audit-based checkpoint reconstruction after interruption, exclusive execution locks, and a `plan-progress` command with completion percentage. Background scheduling and multi-session worker management remain. |
 | 32 | Autonomous project testing | **Complete for bounded registered suites** | Registered test runner, full suite, health diagnostics, and GitHub Actions compile + unittest verification. |
-| 33 | Performance optimization | **Partial** | Added repeatable CI benchmarks and removed a second Python AST/file-read pass. Across repeated Ubuntu CI runs (66 modules, 3 runs each), Python scan medians ranged 0.149–0.180s versus the earlier 0.222s baseline (~19–33% faster). Context-build medians varied 0.333–0.396s versus a 0.363s baseline, so no consistent context-build improvement is claimed. Android/Termux profiling remains. |
+| 33 | Performance optimization | **Partial** | Added repeatable CI benchmarks and removed a second Python AST/file-read pass. Across repeated Ubuntu CI runs (66 modules, 3 runs each), Python scan medians ranged 0.149–0.180s versus the earlier 0.222s baseline (~19–33% faster); the latest run measured 0.166s. Context-build medians ranged 0.333–0.396s versus a 0.363s baseline, so no consistent context-build improvement is claimed. Android/Termux profiling remains. |
 | 34 | End-to-end autonomous developer testing | **Partial** | End-to-end offline plan → approval → execution, patch workflow integration, crash recovery tests. Full multi-file project-development scenarios remain. |
 | 35 | Production-readiness / security validation | **Partial** | Safety policy, read-only bridge, health/audit checks, protected-path rules, strict persisted-plan/checkpoint validation, GitHub CI, an operational runbook, and a security controls/residual-risks review. Final packaging, Android/Termux device validation, and independent security review remain. |
 
 ## Latest verification
 
 - Development branch: `recovery-partial-audit-2026-11-15`
-- Latest verified commit: `8efb4d22`
-- GitHub Actions run #216: compile and full unittest suite passed; **275 tests passed**.
+- Latest verified commit: `b53ef1cc`
+- GitHub Actions run #249: compile and full unittest suite passed; **277 tests passed**.
+- JavaScript context/import integration tests passed on the CI Node.js runtime.
 - CI performance benchmark step passed.
 - Draft PR #1 contains the recovery milestone against `master`.
 - Draft PR #2 contains the follow-up offline planning, diagnostics, Git/environment inspection, and durability work against the development branch.
