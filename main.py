@@ -20,6 +20,7 @@ from engine.deterministic_planner import DeterministicTaskPlanner
 from engine.git_manager import GitManager
 from engine.environment_inspector import EnvironmentInspector
 from engine.performance_profiler import PerformanceProfiler
+from engine.project_scaffolder import ProjectScaffolder
 from engine.patch_approval import PatchApprovalManager
 from engine.patch_transaction import PatchTransaction
 from engine.patch_proposal_service import PatchProposalService
@@ -105,6 +106,23 @@ def main():
     sub.add_parser("environment")
     benchmark = sub.add_parser("benchmark")
     benchmark.add_argument("--iterations", type=int, default=3)
+    scaffold_propose = sub.add_parser("scaffold-propose")
+    scaffold_propose.add_argument("project_name")
+    scaffold_propose.add_argument(
+        "--language",
+        choices=("python", "javascript"),
+        default="python",
+    )
+    scaffold_propose.add_argument("--description", required=True)
+    scaffold_propose.add_argument("--requirements", required=True)
+    sub.add_parser("scaffold-list")
+    scaffold_approve = sub.add_parser("scaffold-approve")
+    scaffold_approve.add_argument("proposal_id")
+    scaffold_apply = sub.add_parser("scaffold-apply")
+    scaffold_apply.add_argument("proposal_id")
+    scaffold_recover = sub.add_parser("scaffold-recover")
+    scaffold_recover.add_argument("proposal_id")
+    scaffold_recover.add_argument("--confirm-stopped", action="store_true")
     sub.add_parser("health")
 
     diagnose_command = sub.add_parser("diagnose")
@@ -688,6 +706,48 @@ def main():
                 iterations=args.iterations,
             )
             print(json.dumps(report, ensure_ascii=False, indent=2))
+
+        elif args.command == "scaffold-propose":
+            record = ProjectScaffolder(ROOT).propose_template(
+                args.project_name,
+                language=args.language,
+                description=args.description,
+                requirements=args.requirements,
+            )
+            print("PROJECT SCAFFOLD PROPOSAL SAVED")
+            print("AI provider calls: DISABLED")
+            print("Proposal ID:", record["proposal_id"])
+            print("Status:", record["status"])
+            print("Target:", record["target"])
+            print("Files:", len(record["files"]))
+            print("Source project changes: NOT performed")
+
+        elif args.command == "scaffold-list":
+            records = ProjectScaffolder(ROOT).list_proposals()
+            print(json.dumps(records, ensure_ascii=False, indent=2))
+
+        elif args.command == "scaffold-approve":
+            record = ProjectScaffolder(ROOT).approve(args.proposal_id)
+            print("SCAFFOLD APPROVED")
+            print("Proposal ID:", record["proposal_id"])
+            print("Status:", record["status"])
+
+        elif args.command == "scaffold-apply":
+            record = ProjectScaffolder(ROOT).apply(args.proposal_id)
+            print("SCAFFOLD APPLIED")
+            print("Proposal ID:", record["proposal_id"])
+            print("Status:", record["status"])
+            print("Generated path:", record["target"])
+
+        elif args.command == "scaffold-recover":
+            record = ProjectScaffolder(ROOT).recover(
+                args.proposal_id,
+                confirm_stopped=args.confirm_stopped,
+            )
+            print("SCAFFOLD RECOVERY COMPLETE")
+            print("Proposal ID:", record["proposal_id"])
+            print("Status:", record["status"])
+            print("Generated path:", record["target"])
 
         elif args.command == "status":
             provider = OpenAIProvider()
