@@ -22,7 +22,7 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 | 28 | Complete project generation from requirements | **Partial** | Deterministic Python/JavaScript starter projects can be proposed and created only after explicit approval, restricted to `workspace/generated_projects/`; existing destinations are never overwritten, no packages are installed, and interrupted creation can be recovered. Full feature implementation from natural-language requirements remains AI-dependent. |
 | 29 | Git integration / version control | **Partial** | Read-only Git status, diff, and log CLI. Branch/commit/push operations intentionally remain unavailable until explicit approval design exists. |
 | 30 | Dependency / environment management | **Partial** | Read-only Python/Node runtime and manifest inspection. Installation remains blocked by default and requires explicit approval. |
-| 31 | Long-running task management | **Partial** | Persistent task lifecycle, durable per-step plan checkpoints, audit-based checkpoint reconstruction after interruption, exclusive execution locks, and a `plan-progress` command with completion percentage. Background scheduling and multi-session worker management remain. |
+| 31 | Long-running task management | **Partial** | Persistent task lifecycle, durable per-step plan checkpoints, audit-based checkpoint reconstruction after interruption, exclusive plan execution locks, and `plan-progress`. Multi-session worker leases now support atomic task claims, owner-token heartbeats/releases, durable SQLite lease events, and explicitly confirmed stale-lease recovery. Workers do not execute plans; background scheduling and unattended orchestration remain deferred. |
 | 32 | Autonomous project testing | **Complete for bounded registered suites** | Registered test runner, full suite, health diagnostics, and GitHub Actions compile + unittest verification. |
 | 33 | Performance optimization | **Partial** | Added repeatable CI benchmarks and removed a second Python AST/file-read pass. After reusing Python symbol metadata from the initial AST pass, repeated Ubuntu CI runs (66–67 modules, 3 runs each) measured Python scan medians 0.133–0.172s versus a 0.222s baseline (~22–40% faster) and context-build medians 0.179–0.221s versus a 0.363s baseline (~39–51% faster); latest run measured 0.145s and 0.197s respectively. Android/Termux profiling remains. |
 | 34 | End-to-end autonomous developer testing | **Partial** | End-to-end offline plan → approval → execution, patch workflow integration, crash recovery tests. Full multi-file project-development scenarios remain. |
@@ -31,12 +31,13 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 ## Latest verification
 
 - Development branch: `recovery-partial-audit-2026-11-15`
-- Latest source commit: `2b194a43b258b193a52175de7a5ad8290f855aad`.
-- GitHub Actions push run #367 and pull-request run #368 passed on both Python 3.12 and Python 3.14.
-- Each runtime passed compilation, the full unittest suite (**302 tests**), and the read-only performance benchmark.
+- Latest source commit: `3399784b69d176ee49315700335ebd583238851b`.
+- GitHub Actions push run #376 and pull-request run #377 passed on both Python 3.12 and Python 3.14.
+- Each runtime passed compilation, the full unittest suite (**307 tests**), and the read-only performance benchmark.
 - Local Bridge resource hardening: a 10-second socket request timeout and a 16-request concurrency ceiling; bridge tests cover the configured bounds.
 - Task lifecycle hardening: task status changes and their audit outbox entries commit in one SQLite transaction. Failed delivery retries on startup, and unique event IDs prevent duplicate delivery after a crash between append and acknowledgement. Task creation and completion now use a separate durable lifecycle audit outbox in the same transaction as their database changes; injected audit-write failures recover on restart without losing events. Read-only health diagnostics now warn when task lifecycle or task status audit outbox events remain pending.
 - Project scaffolding apply/recovery uses per-proposal OS-level exclusive locks, automatically released when the process exits. A concurrent-apply regression test passes on both runtimes.
+- Worker coordination adds atomic pending-task leases, per-worker ownership tokens, heartbeats, releases, durable SQLite lease-event history, and explicit-confirmation-only stale lease recovery. Worker claims do not alter task status or execute plans. Five concurrency/ownership/recovery tests pass on both runtimes.
 - Python/JavaScript scanning, read-only Git/environment inspection, offline planning, bounded scaffolding, patch recovery, and performance benchmark evidence remain as described in milestones 23–35.
 - Android/Termux runtime acceptance, filesystem crash-recovery checks on-device, final packaging, and independent security review remain outstanding.
 - Draft PR #1 contains the recovery milestone against `master`.
