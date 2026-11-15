@@ -218,8 +218,12 @@ class TestPlanExecutor(unittest.TestCase):
     def test_inactive_task_cannot_execute_approved_plan(self):
         for status in ("completed", "cancelled", "failed"):
             with self.subTest(status=status):
-                record = self.save_approved()
-                self.engine.update_task_status(self.task_id, status)
+                task_id = self.engine.create_task(
+                    "Calculator addition",
+                    "Inspect calculator addition implementation.",
+                )
+                record = self.save_approved(task_id=task_id)
+                self.engine.update_task_status(task_id, status)
 
                 with self.assertRaises(PlanExecutionError):
                     self.executor.execute(record["plan_id"])
@@ -227,9 +231,6 @@ class TestPlanExecutor(unittest.TestCase):
                 self.assertFalse(self.lock_path(record["plan_id"]).exists())
                 saved = self.manager.get_plan(record["plan_id"])
                 self.assertNotIn("execution", saved)
-
-                # Restore the fixture task for the next subtest.
-                self.engine.update_task_status(self.task_id, "pending")
 
 
     def test_unapproved_plan_cannot_execute(self):
