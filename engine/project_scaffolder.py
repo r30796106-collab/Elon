@@ -277,12 +277,19 @@ class ProjectScaffolder:
 
     def _fsync_audit(self):
         path = self.audit.path
+        if path.is_symlink() or path.parent.is_symlink():
+            raise ScaffoldingError("Audit log path must not contain symlinks.")
         if not path.exists():
             return
         with path.open("rb") as handle:
             os.fsync(handle.fileno())
 
     def _audit_contains(self, event_name, proposal_id):
+        if (
+            self.audit.path.is_symlink()
+            or self.audit.path.parent.is_symlink()
+        ):
+            raise ScaffoldingError("Audit log path must not contain symlinks.")
         if not self.audit.path.exists():
             return False
         if not self.audit.verify():
