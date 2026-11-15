@@ -31,11 +31,11 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 ## Latest verification
 
 - Development branch: `recovery-partial-audit-2026-11-15`
-- Latest source commit: `ffb98a8b1347118f789cf06a9c5ce1d2aab911fb`.
-- GitHub Actions push run #362 and pull-request run #363 passed on both Python 3.12 and Python 3.14.
-- Each runtime passed compilation, the full unittest suite (**301 tests**), and the read-only performance benchmark.
+- Latest source commit: `2b194a43b258b193a52175de7a5ad8290f855aad`.
+- GitHub Actions push run #367 and pull-request run #368 passed on both Python 3.12 and Python 3.14.
+- Each runtime passed compilation, the full unittest suite (**302 tests**), and the read-only performance benchmark.
 - Local Bridge resource hardening: a 10-second socket request timeout and a 16-request concurrency ceiling; bridge tests cover the configured bounds.
-- Task lifecycle hardening: task status changes and their audit outbox entries commit in one SQLite transaction. Failed delivery retries on startup, and unique event IDs prevent duplicate delivery after a crash between append and acknowledgement. Task creation and completion now use a separate durable lifecycle audit outbox in the same transaction as their database changes; injected audit-write failures recover on restart without losing events.
+- Task lifecycle hardening: task status changes and their audit outbox entries commit in one SQLite transaction. Failed delivery retries on startup, and unique event IDs prevent duplicate delivery after a crash between append and acknowledgement. Task creation and completion now use a separate durable lifecycle audit outbox in the same transaction as their database changes; injected audit-write failures recover on restart without losing events. Read-only health diagnostics now warn when task lifecycle or task status audit outbox events remain pending.
 - Project scaffolding apply/recovery uses per-proposal OS-level exclusive locks, automatically released when the process exits. A concurrent-apply regression test passes on both runtimes.
 - Python/JavaScript scanning, read-only Git/environment inspection, offline planning, bounded scaffolding, patch recovery, and performance benchmark evidence remain as described in milestones 23–35.
 - Android/Termux runtime acceptance, filesystem crash-recovery checks on-device, final packaging, and independent security review remain outstanding.
