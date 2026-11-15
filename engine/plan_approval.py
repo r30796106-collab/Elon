@@ -190,7 +190,7 @@ class PlanApprovalManager:
 
         return record
 
-    def _audit_contains_interruption_event(self, plan_id):
+    def _audit_contains_event(self, event_name, plan_id):
         path = self.audit.path
         if not path.exists():
             return False
@@ -216,7 +216,7 @@ class PlanApprovalManager:
 
                     details = event.get("details")
                     if (
-                        event.get("event") == "PLAN_EXECUTION_INTERRUPTED"
+                        event.get("event") == event_name
                         and isinstance(details, dict)
                         and details.get("plan_id") == plan_id
                     ):
@@ -288,7 +288,7 @@ class PlanApprovalManager:
         # Write the audit event first, then persist the terminal recovery
         # state. If the process stops between these operations, a retry sees
         # the existing event and completes the plan update without duplication.
-        if not self._audit_contains_interruption_event(plan_id):
+        if not self._audit_contains_event("PLAN_EXECUTION_INTERRUPTED", plan_id):
             self.audit.append("PLAN_EXECUTION_INTERRUPTED", {
                 "plan_id": plan_id,
                 "task_id": record["task_id"],
@@ -324,25 +324,30 @@ class PlanApprovalManager:
 
     def _decide(self, plan_id, decision):
         record = self._load(plan_id)
+        event_name = (
+            "PLAN_APPROVED" if decision == "approved" else "PLAN_REJECTED"
+        )
 
-        if record["status"] != "pending":
+        if record["status"] not in ("pending", decision):
             raise PlanApprovalError("Plan has already been reviewed.")
 
-        record["status"] = decision
-        record["reviewed_at"] = self._now()
-
-        path = self._path(plan_id)
-        self._write(path, record)
-
-        self.audit.append(
-            "PLAN_APPROVED" if decision == "approved" else "PLAN_REJECTED",
-            {
-                "plan_id": plan_id,
-                "task_id": record["task_id"],
-                "plan_hash": record["plan_hash"],
-            },
-        )
+        # Persist review evidence first so a retry can complete the record
+        # transition without duplicating the approval/rejection event.
+        if not self._audit_contains_event(event_name, plan_id):
+            self.audit.append(
+                event_name,
+                {
+                    "plan_id": plan_id,
+                    "task_id": record["task_id"],
+                    "plan_hash": record["plan_hash"],
+                },
+            )
         self._fsync_audit_log()
+
+        if record["status"] == "pending":
+            record["status"] = decision
+            record["reviewed_at"] = self._now()
+            self._write(self._path(plan_id), record)
 
         return record
 
