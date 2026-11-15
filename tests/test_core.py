@@ -174,6 +174,62 @@ class ElonCoreTests(unittest.TestCase):
             next(status for status, success in outcomes if success),
         )
 
+    def test_task_status_audit_outbox_recovers_after_append_failure(self):
+        import json
+
+        task_id = self.engine.create_task("Audit outbox recovery")
+        original_append = self.engine.audit.append
+
+        def fail_append(event, details):
+            if event == "TASK_STATUS_UPDATED":
+                raise OSError("simulated audit disk failure")
+            return original_append(event, details)
+
+        self.engine.audit.append = fail_append
+        with self.assertRaises(OSError):
+            self.engine.update_task_status(task_id, "in_progress")
+
+        # The status and its outbox event commit together even when delivery
+        # fails. A fresh engine retries delivery during initialization.
+        self.assertEqual(
+            self.engine.get_task(task_id)["status"], "in_progress"
+        )
+        pending = self.engine._connect()
+        with pending as db:
+            count = db.execute(
+                """SELECT COUNT(*) FROM task_status_audit_outbox
+                WHERE task_id = ? AND delivered_at IS NULL""",
+                (task_id,),
+            ).fetchone()[0]
+        self.assertEqual(count, 1)
+
+        recovered = TaskEngine(self.root)
+        recovered_again = TaskEngine(self.root)
+        self.assertEqual(
+            recovered.get_task(task_id)["status"], "in_progress"
+        )
+
+        records = [
+            json.loads(line)
+            for line in recovered.audit.path.read_text().splitlines()
+            if line.strip()
+        ]
+        status_events = [
+            record for record in records
+            if record.get("event") == "TASK_STATUS_UPDATED"
+            and record.get("details", {}).get("task_status_event_id")
+        ]
+        self.assertEqual(len(status_events), 1)
+        self.assertTrue(recovered.audit_valid())
+
+        with recovered_again._connect() as db:
+            pending_count = db.execute(
+                """SELECT COUNT(*) FROM task_status_audit_outbox
+                WHERE task_id = ? AND delivered_at IS NULL""",
+                (task_id,),
+            ).fetchone()[0]
+        self.assertEqual(pending_count, 0)
+
     def test_unregistered_test_blocked(self):
         with self.assertRaises(PolicyError):
             self.engine.run_registered_tests("unknown")
