@@ -90,6 +90,7 @@ The `health` command is read-only. It checks required directories, SQLite integr
 3. Review the saved plan with `python main.py plans`.
 4. Approve the exact plan ID: `python main.py plan-approve PLAN_ID`.
 5. Execute the approved read-only plan: `python main.py execute-plan PLAN_ID`.
+6. Inspect durable step checkpoints: `python main.py plan-progress PLAN_ID`.
 
 Plan execution is bounded to inspection, analysis, and registered tests. It cannot modify project files. A separate controlled patch proposal and approval workflow is required for source changes.
 
