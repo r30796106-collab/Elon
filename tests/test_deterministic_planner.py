@@ -121,6 +121,9 @@ class DeterministicTaskPlannerTests(unittest.TestCase):
             progress["execution"]["last_checkpoint_state"],
             "completed",
         )
+        self.assertEqual(progress["progress"]["completed_steps"], 3)
+        self.assertEqual(progress["progress"]["total_steps"], 3)
+        self.assertEqual(progress["progress"]["percent"], 100.0)
 
     def test_plan_cli_works_without_configured_ai_provider(self):
         output = io.StringIO()
