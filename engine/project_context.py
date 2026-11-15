@@ -399,6 +399,8 @@ class ProjectContextBuilder:
             "summary": {
                 "files_selected": len(selected),
                 "bytes_selected": total_bytes,
-                "modules_scanned": len(all_modules),\n                "python_modules_scanned": scan["summary"]["modules_scanned"],\n                "javascript_modules_scanned": javascript.get("files_scanned", 0),
+                "modules_scanned": len(all_modules),
+                "python_modules_scanned": scan["summary"]["modules_scanned"],
+                "javascript_modules_scanned": javascript.get("files_scanned", 0),
             },
         }
