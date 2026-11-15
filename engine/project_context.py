@@ -185,6 +185,34 @@ class ProjectContextBuilder:
 
         return sorted(symbols, key=lambda item: (item["line"], item["name"]))
 
+    def _normalize_term(self, term):
+        """Normalize common task-language variants for matching."""
+        aliases = {
+            "calculator": "calcul",
+            "calculate": "calcul",
+            "calculation": "calcul",
+            "calculations": "calcul",
+            "validation": "valid",
+            "validate": "valid",
+            "validated": "valid",
+            "validating": "valid",
+            "quantities": "quant",
+            "quantity": "quant",
+            "booleans": "bool",
+            "boolean": "bool",
+            "negative": "neg",
+            "negatives": "neg",
+            "strings": "string",
+            "integers": "integer",
+        }
+        return aliases.get(term.lower(), term.lower())
+
+    def _term_set(self, text):
+        # Split snake_case identifiers so their individual words can match.
+        text = text.replace("_", " ")
+        words = re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", text.lower())
+        return {self._normalize_term(word) for word in words}
+
     def _score_candidate(self, module, relative, source, keywords):
         """Score path, identifiers, source content and test relevance."""
         task_terms = {self._normalize_term(word) for word in keywords}
