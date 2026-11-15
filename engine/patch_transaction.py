@@ -704,9 +704,9 @@ class PatchTransaction:
                             )
 
                         os.replace(temporary, target)
-                        self._fsync_directory(target.parent)
                         temporary = None
                         restored.append(item["path"])
+                        self._fsync_directory(target.parent)
 
                     finally:
                         if temporary and temporary.exists():
