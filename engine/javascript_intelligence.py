@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -13,6 +14,7 @@ class JavaScriptScanner:
     MAX_FILES = 500
     MAX_FILE_BYTES = 256 * 1024
     CHECK_TIMEOUT_SECONDS = 10
+    MAX_TOTAL_CHECK_SECONDS = 30
     EXTENSIONS = {".js", ".mjs", ".cjs"}
     SKIP_DIRS = {
         ".git", ".venv", "venv", "__pycache__", "node_modules",
@@ -143,10 +145,22 @@ class JavaScriptScanner:
         modules = {}
         dependencies = {}
         syntax_errors = []
+        warnings = []
         known_paths = set(files)
         source_by_path = {}
+        check_started = time.monotonic()
 
         for path in files:
+            if (
+                time.monotonic() - check_started
+                >= self.MAX_TOTAL_CHECK_SECONDS
+            ):
+                warnings.append(
+                    "JavaScript syntax-check time budget reached; remaining files skipped."
+                )
+                skipped.append("JavaScript syntax-check time budget reached")
+                break
+
             relative = path.relative_to(self.root).as_posix()
             try:
                 source = path.read_text(encoding="utf-8")
@@ -243,7 +257,7 @@ class JavaScriptScanner:
                 dependents[target].add(source)
 
         return {
-            "status": "FAIL" if syntax_errors else "PASS",
+            "status": (\n                "FAIL" if syntax_errors\n                else "WARN" if warnings\n                else "PASS"\n            ),
             "node_available": True,
             "files_scanned": len(modules),
             "modules": modules,
@@ -253,6 +267,7 @@ class JavaScriptScanner:
                 for module, items in sorted(dependents.items())
             },
             "syntax_errors": syntax_errors,
+            "warnings": warnings,
             "skipped": skipped,
             "read_only": True,
             "executed_source": False,
