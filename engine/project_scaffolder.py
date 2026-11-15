@@ -1,6 +1,7 @@
 """Deterministic, approval-gated project scaffolding inside workspace only."""
 
 import hashlib
+from contextlib import contextmanager
 import json
 import os
 import re
@@ -577,15 +578,70 @@ class ProjectScaffolder:
             self._write_record(self._proposal_path(proposal_id), record)
             raise
 
+    @contextmanager
+    def _proposal_lock(self, proposal_id):
+        """Hold an OS-released per-proposal lock across apply/recovery."""
+        lock_path = self._proposal_path(proposal_id).with_suffix(".lock")
+        if self.proposals.is_symlink() or lock_path.is_symlink():
+            raise ScaffoldingError("Scaffold lock path must not be a symlink.")
+
+        flags = os.O_RDWR | os.O_CREAT
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(lock_path, flags, 0o600)
+        except OSError:
+            raise ScaffoldingError("Could not safely open scaffold lock.") from None
+
+        handle = os.fdopen(descriptor, "r+b")
+        locked = False
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                handle.seek(0, os.SEEK_END)
+                if handle.tell() == 0:
+                    handle.write(b"0")
+                    handle.flush()
+                handle.seek(0)
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                except OSError:
+                    raise ScaffoldingError(
+                        "Scaffold proposal is already being applied or recovered."
+                    ) from None
+                locked = True
+            else:
+                import fcntl
+
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise ScaffoldingError(
+                        "Scaffold proposal is already being applied or recovered."
+                    ) from None
+                locked = True
+            yield
+        finally:
+            if locked:
+                if os.name == "nt":
+                    import msvcrt
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
+
     def apply(self, proposal_id):
-        record = self._load(proposal_id)
-        if record["status"] == "pending":
-            raise ScaffoldingError("Scaffold proposal requires explicit approval.")
-        if record["status"] == "applied":
-            return record
-        if not self._audit_contains("PROJECT_SCAFFOLD_APPROVED", proposal_id):
-            raise ScaffoldingError("Scaffold approval audit evidence is missing.")
-        return self._apply_record(record, recovery=False)
+        with self._proposal_lock(proposal_id):
+            record = self._load(proposal_id)
+            if record["status"] == "pending":
+                raise ScaffoldingError("Scaffold proposal requires explicit approval.")
+            if record["status"] == "applied":
+                return record
+            if not self._audit_contains("PROJECT_SCAFFOLD_APPROVED", proposal_id):
+                raise ScaffoldingError("Scaffold approval audit evidence is missing.")
+            return self._apply_record(record, recovery=False)
 
     def verify(self, proposal_id):
         record = self._load(proposal_id)
@@ -697,18 +753,19 @@ class ProjectScaffolder:
             raise ScaffoldingError(
                 "Recovery requires confirmation that the original process stopped."
             )
-        record = self._load(proposal_id)
-        if record["status"] == "applied":
-            return record
-        if record["status"] not in ("applying", "recovery_required"):
-            raise ScaffoldingError(
-                "Only an interrupted scaffold application can be recovered."
-            )
-        if not self._audit_contains("PROJECT_SCAFFOLD_APPROVED", proposal_id):
-            raise ScaffoldingError("Scaffold approval audit evidence is missing.")
-        recovered = self._apply_record(record, recovery=True)
-        self._audit("PROJECT_SCAFFOLD_RECOVERED", {
-            "proposal_id": proposal_id,
-            "project_name": recovered["project_name"],
-        })
-        return recovered
+        with self._proposal_lock(proposal_id):
+            record = self._load(proposal_id)
+            if record["status"] == "applied":
+                return record
+            if record["status"] not in ("applying", "recovery_required"):
+                raise ScaffoldingError(
+                    "Only an interrupted scaffold application can be recovered."
+                )
+            if not self._audit_contains("PROJECT_SCAFFOLD_APPROVED", proposal_id):
+                raise ScaffoldingError("Scaffold approval audit evidence is missing.")
+            recovered = self._apply_record(record, recovery=True)
+            self._audit("PROJECT_SCAFFOLD_RECOVERED", {
+                "proposal_id": proposal_id,
+                "project_name": recovered["project_name"],
+            })
+            return recovered
