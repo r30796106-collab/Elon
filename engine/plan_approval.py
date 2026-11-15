@@ -1,5 +1,6 @@
 """Persistent, hash-verified review and approval for validated plans."""
 
+import errno
 import json
 import os
 import re
@@ -72,9 +73,14 @@ class PlanApprovalManager:
             try:
                 directory_fd = os.open(self.directory, os.O_RDONLY)
                 os.fsync(directory_fd)
-            except OSError:
-                # Some platforms/filesystems do not support directory fsync.
-                pass
+            except OSError as error:
+                # Ignore only filesystems that explicitly lack directory fsync.
+                if error.errno not in (
+                    errno.EINVAL,
+                    errno.ENOTSUP,
+                    errno.EBADF,
+                ):
+                    raise
             finally:
                 if directory_fd is not None:
                     os.close(directory_fd)
