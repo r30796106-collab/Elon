@@ -5,6 +5,7 @@ from pathlib import Path
 from engine.deterministic_planner import DeterministicTaskPlanner
 from engine.task_engine import TaskEngine
 from engine.plan_approval import PlanApprovalManager
+from engine.plan_executor import PlanExecutor
 from engine.ai_task_planner import TaskPlanError
 
 
@@ -53,6 +54,50 @@ class DeterministicTaskPlannerTests(unittest.TestCase):
             plan,
         )
         self.assertEqual(saved["status"], "pending")
+
+    def test_offline_plan_approval_and_execution_work_end_to_end(self):
+        task = self.engine.get_task(self.task_id)
+        plan = self.planner.plan({
+            "title": task["title"],
+            "description": task["description"],
+        })
+        manager = PlanApprovalManager(self.root)
+        saved = manager.save_plan(self.task_id, plan)
+        manager.approve(saved["plan_id"])
+
+        original_source = (
+            self.root / "workspace" / "calculator.py"
+        ).read_bytes()
+        executor = PlanExecutor(self.engine, manager)
+
+        from unittest.mock import patch
+        with patch.object(
+            self.engine,
+            "run_registered_tests",
+            return_value={
+                "success": True,
+                "returncode": 0,
+                "stdout": "simulated registered tests passed",
+                "stderr": "",
+            },
+        ):
+            result = executor.execute(saved["plan_id"])
+
+        self.assertEqual(result["state"], "completed")
+        self.assertTrue(result["execution_performed"])
+        self.assertEqual(
+            self.engine.get_task(self.task_id)["status"],
+            "completed",
+        )
+        self.assertEqual(
+            manager.get_plan(saved["plan_id"])["execution"]["state"],
+            "completed",
+        )
+        self.assertEqual(
+            (self.root / "workspace" / "calculator.py").read_bytes(),
+            original_source,
+        )
+        self.assertTrue(self.engine.audit.verify())
 
     def test_restricted_objective_is_rejected(self):
         with self.assertRaises(TaskPlanError):
