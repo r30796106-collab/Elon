@@ -74,6 +74,32 @@ class PatchRecoveryTests(unittest.TestCase):
                     ),
                 )
 
+    def test_backup_fsync_failure_aborts_before_source_replacement(self):
+        patch = {
+            "path": "a.py",
+            "content": "value = 101\\n",
+            "expected_sha256": self.digest(self.old_a),
+        }
+
+        from unittest.mock import patch as mock_patch
+        with mock_patch(
+            "engine.patch_transaction.os.fsync",
+            side_effect=OSError("simulated backup sync failure"),
+        ):
+            with self.assertRaisesRegex(OSError, "backup sync failure"):
+                self.transaction.apply(self.task_id, [patch])
+
+        self.assertEqual(self.a.read_bytes(), self.old_a)
+        with self.engine._connect() as db:
+            count = db.execute(
+                "SELECT COUNT(*) FROM patch_transactions"
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
+
+        backups = list(self.engine.backups.glob("*.bak"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), self.old_a)
+
     def test_confirmation_required(self):
         self.create_interrupted()
 
