@@ -1,6 +1,7 @@
 """Explicit, non-executing worker leases for coordinating task ownership."""
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -38,8 +39,14 @@ class WorkerCoordinator:
                 )
             """)
 
+    @contextmanager
     def _connect(self):
-        return sqlite3.connect(self.db_path, timeout=10)
+        db = sqlite3.connect(self.db_path, timeout=10)
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     @staticmethod
     def _now():
