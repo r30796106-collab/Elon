@@ -585,6 +585,93 @@ class ProjectScaffolder:
             raise ScaffoldingError("Scaffold approval audit evidence is missing.")
         return self._apply_record(record, recovery=False)
 
+    def verify(self, proposal_id):
+        record = self._load(proposal_id)
+        expected = self._validate_record_files(record)
+        target = self._target_path(record)
+        missing = []
+        modified = []
+        unexpected = []
+        if target.is_symlink() or not target.is_dir():
+            return {
+                "status": "FAIL",
+                "read_only": True,
+                "proposal_id": proposal_id,
+                "target": record["target"],
+                "missing": sorted(expected),
+                "modified": [],
+                "unexpected": [],
+            }
+
+        for relative, data in expected.items():
+            path = target / Path(relative)
+            if path.is_symlink():
+                modified.append(relative)
+                continue
+            if not path.is_file():
+                missing.append(relative)
+                continue
+            try:
+                if self._sha256(path.read_bytes()) != self._sha256(data):
+                    modified.append(relative)
+            except OSError:
+                modified.append(relative)
+
+        for current, directories, filenames in os.walk(
+            target,
+            topdown=True,
+            followlinks=False,
+        ):
+            current_path = Path(current)
+            for directory in directories:
+                directory_path = current_path / directory
+                if directory_path.is_symlink():
+                    unexpected.append(
+                        directory_path.relative_to(target).as_posix()
+                    )
+            for filename in filenames:
+                path = current_path / filename
+                relative = path.relative_to(target).as_posix()
+                if relative == ".elon-scaffold.json":
+                    if path.is_symlink():
+                        modified.append(relative)
+                    continue
+                if relative not in expected:
+                    unexpected.append(relative)
+
+        manifest_path = target / ".elon-scaffold.json"
+        expected_manifest = {
+            "proposal_id": proposal_id,
+            "project_name": record["project_name"],
+            "language": record["language"],
+            "files": {
+                relative: self._sha256(data)
+                for relative, data in expected.items()
+            },
+        }
+        try:
+            actual_manifest = json.loads(
+                manifest_path.read_text(encoding="utf-8")
+            )
+            if actual_manifest != expected_manifest:
+                modified.append(".elon-scaffold.json")
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            modified.append(".elon-scaffold.json")
+
+        missing = sorted(set(missing))
+        modified = sorted(set(modified))
+        unexpected = sorted(set(unexpected))
+        return {
+            "status": "PASS" if not (missing or modified or unexpected) else "FAIL",
+            "read_only": True,
+            "proposal_id": proposal_id,
+            "target": record["target"],
+            "file_count": len(expected),
+            "missing": missing,
+            "modified": modified,
+            "unexpected": unexpected,
+        }
+
     def recover(self, proposal_id, confirm_stopped=False):
         if confirm_stopped is not True:
             raise ScaffoldingError(
