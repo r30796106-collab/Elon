@@ -220,6 +220,57 @@ class TestPlanApproval(unittest.TestCase):
         self.assertEqual(len(matching), 1)
         self.assertTrue(self.manager.audit.verify())
 
+    def test_interrupted_audit_append_then_raise_is_idempotent(self):
+        record, lock = self.make_claimed_execution()
+        original_append = self.manager.audit.append
+        failed = {"value": False}
+
+        def append_then_fail(event, details):
+            result = original_append(event, details)
+            if (
+                event == "PLAN_EXECUTION_INTERRUPTED"
+                and not failed["value"]
+            ):
+                failed["value"] = True
+                raise OSError("simulated post-append audit failure")
+            return result
+
+        from unittest.mock import patch
+        with patch.object(
+            self.manager.audit,
+            "append",
+            side_effect=append_then_fail,
+        ):
+            with self.assertRaises(OSError):
+                self.manager.mark_interrupted(
+                    record["plan_id"],
+                    confirm_stopped=True,
+                )
+
+            saved = self.manager.get_plan(record["plan_id"])
+            self.assertEqual(saved["execution"]["state"], "claimed")
+
+            recovered = self.manager.mark_interrupted(
+                record["plan_id"],
+                confirm_stopped=True,
+            )
+
+        self.assertEqual(recovered["execution"]["state"], "interrupted")
+        self.assertTrue(lock.exists())
+        audit_lines = [
+            json.loads(line)
+            for line in (self.root / "logs" / "audit.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        matching = [
+            item for item in audit_lines
+            if item.get("event") == "PLAN_EXECUTION_INTERRUPTED"
+            and item.get("details", {}).get("plan_id") == record["plan_id"]
+        ]
+        self.assertEqual(len(matching), 1)
+        self.assertTrue(self.manager.audit.verify())
+
     def test_recovery_marks_claimed_execution_interrupted(self):
         record, lock = self.make_claimed_execution()
 
