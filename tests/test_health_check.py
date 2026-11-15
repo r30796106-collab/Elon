@@ -58,6 +58,34 @@ class HealthCheckTests(unittest.TestCase):
             "recovery_required",
         )
 
+    def test_pending_recovery_outbox_warns_with_minimal_schema(self):
+        with closing(sqlite3.connect(self.root / "elon.sqlite3")) as db:
+            db.execute(
+                """CREATE TABLE patch_recovery_audit_outbox (
+                    transaction_id TEXT PRIMARY KEY,
+                    task_id INTEGER NOT NULL,
+                    details_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    delivered_at TEXT
+                )"""
+            )
+            db.execute(
+                """INSERT INTO patch_recovery_audit_outbox
+                   (transaction_id, task_id, details_json, created_at, delivered_at)
+                   VALUES (?, ?, ?, ?, NULL)""",
+                ("pending-transaction", 1, "{}", "now"),
+            )
+            db.commit()
+
+        report = HealthChecker(self.root).run()
+        consistency = report["checks"]["consistency"]
+        self.assertEqual(report["status"], "WARN")
+        self.assertEqual(consistency["status"], "WARN")
+        self.assertTrue(
+            any("outbox event(s) pending delivery" in item
+                for item in consistency["warnings"])
+        )
+
     def test_corrupt_audit_fails(self):
         path = self.root / "logs" / "audit.jsonl"
         path.write_text("{broken json\n", encoding="utf-8")
