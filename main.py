@@ -18,6 +18,7 @@ from engine.plan_executor import PlanExecutor
 from engine.deterministic_planner import DeterministicTaskPlanner
 from engine.git_manager import GitManager
 from engine.environment_inspector import EnvironmentInspector
+from engine.performance_profiler import PerformanceProfiler
 from engine.patch_approval import PatchApprovalManager
 from engine.patch_transaction import PatchTransaction
 from engine.patch_proposal_service import PatchProposalService
@@ -99,6 +100,8 @@ def main():
     git_log.add_argument("--limit", type=int, default=10)
     sub.add_parser("usage")
     sub.add_parser("environment")
+    benchmark = sub.add_parser("benchmark")
+    benchmark.add_argument("--iterations", type=int, default=3)
     sub.add_parser("health")
 
     diagnose_command = sub.add_parser("diagnose")
@@ -588,6 +591,12 @@ def main():
 
         elif args.command == "environment":
             report = EnvironmentInspector(ROOT).inspect()
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+
+        elif args.command == "benchmark":
+            report = PerformanceProfiler(ROOT).benchmark(
+                iterations=args.iterations,
+            )
             print(json.dumps(report, ensure_ascii=False, indent=2))
 
         elif args.command == "status":
