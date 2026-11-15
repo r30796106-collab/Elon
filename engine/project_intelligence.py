@@ -109,6 +109,7 @@ class ProjectScanner:
                     "path": path.relative_to(self.root).as_posix(),
                     "lines": len(source.splitlines()),
                     "bytes": size,
+                    "symbols": [],
                 }
 
                 dependencies[module] = set()
@@ -149,6 +150,23 @@ class ProjectScanner:
                                 )
 
                     imports_by_module[module].extend(imported)
+
+                    if isinstance(
+                        node,
+                        (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+                    ):
+                        modules[module]["symbols"].append({
+                            "name": node.name,
+                            "kind": (
+                                "class" if isinstance(node, ast.ClassDef)
+                                else "function"
+                            ),
+                            "line": node.lineno,
+                        })
+
+                modules[module]["symbols"].sort(
+                    key=lambda item: (item["line"], item["name"])
+                )
 
             except (OSError, UnicodeError, SyntaxError, ValueError) as error:
                 error_record = {
