@@ -1,5 +1,6 @@
 import io
 import json
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -139,6 +140,39 @@ class DeterministicTaskPlannerTests(unittest.TestCase):
         records = PlanApprovalManager(self.root).list_plans()
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["status"], "pending")
+
+    def test_deterministic_plan_includes_javascript_inspection(self):
+        if not shutil.which("node"):
+            self.skipTest("Node.js is not installed")
+
+        javascript = self.root / "workspace" / "calculator_app.mjs"
+        javascript.write_text(
+            "export function calculateTotal(price, quantity) {\\n"
+            "    return price * quantity;\\n"
+            "}\\n",
+            encoding="utf-8",
+        )
+
+        plan = self.planner.plan({
+            "title": "Calculator app review",
+            "description": "Inspect calculator app source and calculate total.",
+        })
+
+        inspect_step = next(
+            step for step in plan["steps"]
+            if step["type"] == "inspect"
+        )
+        self.assertIn(
+            "workspace/calculator_app.mjs",
+            inspect_step["files"],
+        )
+        analyze_step = next(
+            step for step in plan["steps"]
+            if step["type"] == "analyze"
+        )
+        self.assertTrue(
+            all(path.endswith(".py") for path in analyze_step["files"])
+        )
 
     def test_restricted_objective_is_rejected(self):
         with self.assertRaises(TaskPlanError):
