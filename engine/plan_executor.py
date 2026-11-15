@@ -1,5 +1,6 @@
 """Bounded, audited execution of approved, read-only development plans."""
 
+import errno
 import hashlib
 import json
 import os
@@ -26,8 +27,29 @@ class PlanExecutor:
         self.scanner = ProjectScanner(self.root)
         self.planner = AITaskPlanner(self.root, provider=None)
 
+    def _fsync_audit_log(self):
+        path = self.engine.audit.path
+        with path.open("rb") as handle:
+            os.fsync(handle.fileno())
+
+        descriptor = None
+        try:
+            descriptor = os.open(str(path.parent), os.O_RDONLY)
+            os.fsync(descriptor)
+        except OSError as error:
+            if error.errno not in (
+                errno.EINVAL,
+                errno.ENOTSUP,
+                errno.EBADF,
+            ):
+                raise
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
     def _audit(self, event, details):
         self.engine.audit.append(event, details)
+        self._fsync_audit_log()
 
     def _audit_contains_event(self, event_name, plan_id):
         path = self.engine.audit.path
@@ -317,6 +339,7 @@ class PlanExecutor:
                         "status": expected_status,
                     })
                 self.engine.update_task_status(task_id, expected_status)
+                self._fsync_audit_log()
             elif task.get("status") != expected_status:
                 raise PlanExecutionError(
                     "Terminal plan execution conflicts with terminal task status; "
@@ -459,6 +482,7 @@ class PlanExecutor:
                     task_id,
                     "completed" if state == "completed" else "failed",
                 )
+                self._fsync_audit_log()
                 self._audit("PLAN_EXECUTION_FINISHED", {
                     "plan_id": plan_id,
                     "task_id": task_id,
