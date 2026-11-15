@@ -93,6 +93,15 @@ class TestPlanExecutor(unittest.TestCase):
         result = self.executor.execute(record["plan_id"])
 
         self.assertEqual(result["state"], "completed")
+        saved = self.manager.get_plan(record["plan_id"])
+        self.assertEqual(
+            saved["execution"]["completed_steps"],
+            [1],
+        )
+        self.assertEqual(
+            saved["execution"]["last_checkpoint_state"],
+            "completed",
+        )
         self.assertEqual(
             self.engine.get_task(self.task_id)["status"], "completed"
         )
@@ -126,6 +135,13 @@ class TestPlanExecutor(unittest.TestCase):
             result = self.executor.execute(record["plan_id"])
 
         self.assertEqual(result["state"], "failed")
+        saved = self.manager.get_plan(record["plan_id"])
+        self.assertEqual(saved["execution"]["completed_steps"], [])
+        self.assertEqual(saved["execution"]["failed_step"], 1)
+        self.assertEqual(
+            saved["execution"]["last_checkpoint_state"],
+            "failed",
+        )
         self.assertEqual(
             self.engine.get_task(self.task_id)["status"], "failed"
         )
