@@ -297,11 +297,15 @@ class PlanApprovalManager:
             })
         self._fsync_audit_log()
 
-        record["execution"] = {
+        interrupted_execution = (
+            dict(execution) if isinstance(execution, dict) else {}
+        )
+        interrupted_execution.update({
             "state": "interrupted",
             "started_at": started_at,
             "finished_at": self._now(),
-        }
+        })
+        record["execution"] = interrupted_execution
 
         self._write(self._path(plan_id), record)
 
