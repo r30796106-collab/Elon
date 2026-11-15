@@ -80,6 +80,28 @@ class JavaScriptScannerTests(unittest.TestCase):
         self.assertFalse(marker.exists())
         self.assertFalse(report["executed_source"])
 
+    def test_total_syntax_check_budget_is_bounded(self):
+        self.require_node()
+        (self.source / "one.mjs").write_text(
+            "export const one = 1;\\n",
+            encoding="utf-8",
+        )
+        (self.source / "two.mjs").write_text(
+            "export const two = 2;\\n",
+            encoding="utf-8",
+        )
+
+        with patch.object(JavaScriptScanner, "MAX_TOTAL_CHECK_SECONDS", 0):
+            report = JavaScriptScanner(self.root).scan()
+
+        self.assertEqual(report["status"], "WARN")
+        self.assertEqual(report["files_scanned"], 0)
+        self.assertTrue(report["warnings"])
+        self.assertIn(
+            "JavaScript syntax-check time budget reached",
+            report["skipped"],
+        )
+
     def test_missing_node_warns_when_javascript_files_exist(self):
         (self.source / "main.mjs").write_text(
             "export const value = 1;\n",
