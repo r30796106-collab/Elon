@@ -13,7 +13,6 @@ from engine.tool_registry import ToolRegistry
 from engine.local_bridge import LocalBridgeServer
 from engine.ai_tool_controller import AIToolController
 from engine.ai_tool_orchestrator import AIToolOrchestrator
-from engine.ai_task_planner import AITaskPlanner
 from engine.plan_approval import PlanApprovalManager
 from engine.plan_executor import PlanExecutor
 from engine.deterministic_planner import DeterministicTaskPlanner
