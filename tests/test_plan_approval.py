@@ -189,6 +189,38 @@ class TestPlanApproval(unittest.TestCase):
         )
         return record, lock
 
+    def test_interrupted_recovery_rebuilds_checkpoint_from_audit(self):
+        record, lock = self.make_claimed_execution()
+        self.manager.audit.append(
+            "PLAN_STEP_COMPLETED",
+            {
+                "plan_id": record["plan_id"],
+                "task_id": record["task_id"],
+                "step_id": 2,
+                "step_type": "inspect",
+            },
+        )
+        self.manager._fsync_audit_log()
+
+        recovered = self.manager.mark_interrupted(
+            record["plan_id"],
+            confirm_stopped=True,
+        )
+
+        self.assertEqual(
+            recovered["execution"]["completed_steps"],
+            [2],
+        )
+        self.assertEqual(
+            recovered["execution"]["last_completed_step"],
+            2,
+        )
+        self.assertEqual(
+            recovered["execution"]["state"],
+            "interrupted",
+        )
+        self.assertTrue(lock.exists())
+
     def test_interrupted_recovery_preserves_completed_step_checkpoints(self):
         record, lock = self.make_claimed_execution()
         record["execution"]["completed_steps"] = [1, 2]
