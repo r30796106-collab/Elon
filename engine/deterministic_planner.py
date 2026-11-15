@@ -60,7 +60,9 @@ class DeterministicTaskPlanner:
             next_id += 1
 
         registered = self.validator.policy.REGISTERED_TESTS
-        if "core" in registered:
+        if "full" in registered:
+            test_name = "full"
+        elif "core" in registered:
             test_name = "core"
         elif registered:
             test_name = sorted(registered)[0]
@@ -69,7 +71,7 @@ class DeterministicTaskPlanner:
 
         steps.append({
             "id": next_id,
-            "description": "Run the registered core verification suite.",
+            "description": "Run the registered full verification suite.",
             "type": "test",
             "files": [],
             "tests": [test_name],
