@@ -110,6 +110,18 @@ class PatchApprovalManager:
                 os.fsync(file.fileno())
 
             os.replace(temporary, path)
+
+            # Persist the directory entry for the atomic proposal replacement
+            # where the underlying filesystem supports directory fsync.
+            directory_fd = None
+            try:
+                directory_fd = os.open(self.directory, os.O_RDONLY)
+                os.fsync(directory_fd)
+            except OSError:
+                pass
+            finally:
+                if directory_fd is not None:
+                    os.close(directory_fd)
         finally:
             if temporary and temporary.exists():
                 temporary.unlink()
