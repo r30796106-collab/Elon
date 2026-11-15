@@ -96,7 +96,7 @@ class PatchWorkflowIntegrationTests(unittest.TestCase):
 
         self.assertTrue(result["success"])
         self.assertEqual(self.target.read_text(), "value = 20\n")
-        self.assertEqual(second.read_text(), "total = 15\\n")
+        self.assertEqual(second.read_text(), "total = 15\n")
         self.assertEqual(len(result["patches"]), 2)
         self.assertTrue(self.engine.audit.verify())
 
