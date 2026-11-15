@@ -216,7 +216,10 @@ class TestPlanExecutor(unittest.TestCase):
         self.assertFalse(self.lock_path(record["plan_id"]).exists())
 
     def test_reconciliation_retries_when_audit_append_fails(self):
-        record = self.save_approved()
+        saved = self.save_approved()
+        # approve() persists a separately loaded record; reload it so this
+        # simulated terminal execution retains the approved status.
+        record = self.manager.get_plan(saved["plan_id"])
         record["execution"] = {
             "state": "completed",
             "started_at": self.manager._now(),
