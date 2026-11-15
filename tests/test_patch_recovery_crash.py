@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -51,7 +52,9 @@ class RecoveryProcessCrashTests(unittest.TestCase):
 
         return engine, target, old_data, task_id, transaction_id
 
-    def _run_recovery_crash_child(self, root, transaction_id, exit_code, after_append):
+    def _run_recovery_crash_child(
+        self, root, transaction_id, exit_code, after_append
+    ):
         script = r'''
 import os
 import sys
@@ -96,7 +99,7 @@ transaction.recover(transaction_id, confirm_stopped=True)
 
     def _assert_one_recovery_audit_event(self, engine, transaction_id):
         records = [
-            __import__("json").loads(line)
+            json.loads(line)
             for line in (engine.logs / "audit.jsonl").read_text().splitlines()
         ]
         matching = [
