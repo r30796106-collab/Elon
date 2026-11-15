@@ -582,7 +582,11 @@ class ProjectScaffolder:
     def _proposal_lock(self, proposal_id):
         """Hold an OS-released per-proposal lock across apply/recovery."""
         lock_path = self._proposal_path(proposal_id).with_suffix(".lock")
-        if self.proposals.is_symlink() or lock_path.is_symlink():
+        if (
+            self.workspace.is_symlink()
+            or self.proposals.is_symlink()
+            or lock_path.is_symlink()
+        ):
             raise ScaffoldingError("Scaffold lock path must not be a symlink.")
 
         flags = os.O_RDWR | os.O_CREAT
