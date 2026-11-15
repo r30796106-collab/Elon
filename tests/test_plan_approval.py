@@ -174,6 +174,52 @@ class TestPlanApproval(unittest.TestCase):
         )
         self.assertTrue(lock.exists())
 
+    def test_interrupted_recovery_retries_after_plan_write_failure(self):
+        record, lock = self.make_claimed_execution()
+        original_write = self.manager._write
+        calls = {"count": 0}
+
+        def fail_once(path, value):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise OSError("simulated plan persistence failure")
+            return original_write(path, value)
+
+        from unittest.mock import patch
+        with patch.object(self.manager, "_write", side_effect=fail_once):
+            with self.assertRaises(OSError):
+                self.manager.mark_interrupted(
+                    record["plan_id"],
+                    confirm_stopped=True,
+                )
+
+            # The audit event is durable, while the plan is still claimed.
+            self.assertEqual(
+                self.manager.get_plan(record["plan_id"])["execution"]["state"],
+                "claimed",
+            )
+
+            recovered = self.manager.mark_interrupted(
+                record["plan_id"],
+                confirm_stopped=True,
+            )
+
+        self.assertEqual(recovered["execution"]["state"], "interrupted")
+        self.assertTrue(lock.exists())
+        audit_lines = [
+            json.loads(line)
+            for line in (self.root / "logs" / "audit.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        matching = [
+            item for item in audit_lines
+            if item.get("event") == "PLAN_EXECUTION_INTERRUPTED"
+            and item.get("details", {}).get("plan_id") == record["plan_id"]
+        ]
+        self.assertEqual(len(matching), 1)
+        self.assertTrue(self.manager.audit.verify())
+
     def test_recovery_marks_claimed_execution_interrupted(self):
         record, lock = self.make_claimed_execution()
 
