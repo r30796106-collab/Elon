@@ -1,0 +1,2 @@
+Blue Ant cross-repository coding worker smoke test.
+Temporary verification file; do not merge this PR.
