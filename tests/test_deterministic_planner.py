@@ -47,7 +47,7 @@ class DeterministicTaskPlannerTests(unittest.TestCase):
             step for step in plan["steps"]
             if step["type"] == "test"
         )
-        self.assertEqual(test_step["tests"], ["core"])
+        self.assertEqual(test_step["tests"], ["full"])
 
         saved = PlanApprovalManager(self.root).save_plan(
             self.task_id,
