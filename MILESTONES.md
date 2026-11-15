@@ -31,14 +31,14 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 ## Latest verification
 
 - Development branch: `recovery-partial-audit-2026-11-15`
-- Latest verified branch commit: `fbd4af123b796a4af6857fcd87713470c4242023`
-- Latest GitHub Actions run #324 (pull-request validation): compile passed; full unittest suite passed; **295 tests passed**; read-only benchmark passed.
-- JavaScript context/import discovery without Node.js is covered by passing tests; Node.js syntax checking remains optional and parser-only.
-- Latest benchmark (3 iterations): Python project scan median 0.183s (70 modules); JavaScript scan median 0.00069s; health-check median 0.00063s; context-build median 0.242s (12 files selected). The current ELON repository contains no JavaScript project modules in this benchmark, so the context benchmark reports 0 JavaScript modules; dedicated fixture tests verify JavaScript context selection and imports.
+- Latest source commit: `712a73523e2c51c562aba7fc5a2964220e20810d`
+- GitHub Actions push run #328 and pull-request validation run #329 both passed.
+- Compile check passed; full unittest suite: **295 tests passed**; read-only benchmark passed.
+- Latest benchmark (3 iterations): Python project scan median 0.145172s (70 modules); JavaScript scan 0.000506s; health check 0.000410s; context build 0.195745s (12 files selected). The repository has no JavaScript modules in this benchmark; dedicated fixture tests verify JavaScript context and local import discovery.
+- JavaScript context/import discovery works without Node.js; Node.js syntax checking remains optional and parser-only.
 - Draft PR #1 contains the recovery milestone against `master`.
-- Draft PR #2 contains the follow-up offline planning, diagnostics, Git/environment inspection, JavaScript context discovery, and durability work against the development branch.
+- Draft PR #2 contains offline planning, diagnostics, Git/environment inspection, JavaScript context discovery, and durability work.
 - Neither PR is merged.
-
 
 ## Completion rule
 
