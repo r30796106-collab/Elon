@@ -24,7 +24,7 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 | 30 | Dependency / environment management | **Partial** | Read-only Python/Node runtime and manifest inspection. Installation remains blocked by default and requires explicit approval. |
 | 31 | Long-running task management | **Partial** | Persistent task lifecycle, durable plan execution records, exclusive execution locks, and explicit interrupted recovery. Background scheduling and multi-session worker management remain. |
 | 32 | Autonomous project testing | **Complete for bounded registered suites** | Registered test runner, full suite, health diagnostics, and GitHub Actions compile + unittest verification. |
-| 33 | Performance optimization | **Pending** | Establish reproducible scanner/planner/test baselines, profile bottlenecks, optimize only with regression evidence. |
+| 33 | Performance optimization | **Partial** | Read-only benchmark command now measures Python scan, JavaScript scan, health check, and context-build baselines. Profiling and measured optimizations with regression evidence remain. |
 | 34 | End-to-end autonomous developer testing | **Partial** | End-to-end offline plan → approval → execution, patch workflow integration, crash recovery tests. Full multi-file project-development scenarios remain. |
 | 35 | Production-readiness / security validation | **Partial** | Safety policy, read-only bridge, health/audit checks, protected-path rules, GitHub CI. Final packaging, device validation, operational runbook, and security review remain. |
 
