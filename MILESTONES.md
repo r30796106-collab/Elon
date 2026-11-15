@@ -31,10 +31,11 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 ## Latest verification
 
 - Development branch: `recovery-partial-audit-2026-11-15`
-- Latest source commit: `6eb33c7c4599119416fb34556db6c3d467788558`
-- GitHub Actions push run #338 and pull-request run #339 passed on both Python 3.12 and Python 3.14.
-- Each runtime passed compilation, the full unittest suite (**296 tests**), and the read-only performance benchmark.
+- Latest source commit: `5385b5a8f33303b225de8cffe80b51729bc7ed6b`
+- GitHub Actions push run #344 and pull-request run #345 passed on both Python 3.12 and Python 3.14.
+- Each runtime passed compilation, the full unittest suite (**297 tests**), and the read-only performance benchmark.
 - Local Bridge resource hardening: a 10-second socket request timeout and a 16-request concurrency ceiling; bridge tests cover the configured bounds.
+- Task lifecycle hardening: task status transitions now enforce terminal-state rules inside a single atomic SQL update, preventing concurrent workers from reviving or overwriting a completed/cancelled task. A concurrent terminal-update regression test passes on both runtimes.
 - Python 3.12 benchmark medians (3 iterations): project scan 0.145172s; JavaScript scan 0.000506s; health check 0.000410s; context build 0.195745s.
 - Python 3.14 benchmark medians (3 iterations): project scan 0.242168s; JavaScript scan 0.000734s; health check 0.000658s; context build 0.322711s. Runtime-specific timings are recorded separately and are not compared as a like-for-like optimization result.
 - Both benchmark runs scanned 70 Python modules and selected 12 context files. The repository has no JavaScript modules in this benchmark; dedicated fixture tests verify JavaScript context and local import discovery.
