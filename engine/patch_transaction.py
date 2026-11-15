@@ -257,10 +257,10 @@ class PatchTransaction:
                 ) as file:
                     temporary = Path(file.name)
                     file.write(item["content"])
+                    os.chmod(temporary, item["old_mode"])
                     file.flush()
                     os.fsync(file.fileno())
 
-                os.chmod(temporary, item["old_mode"])
                 item["temporary"] = temporary
                 staged.append(item)
 
