@@ -1,32 +1,107 @@
 # ELON
 
-General-purpose autonomous AI development agent.
+ELON is a general-purpose developer-agent project. The V1 foundation prioritizes deterministic project inspection, task tracking, registered testing, controlled change workflows, crash recovery, and auditable operations.
 
-## Architecture
+AI-provider integrations remain in the repository for a later, separate milestone. They are not required for the deterministic V1 diagnostic and safety workflows.
 
-- core: Task understanding and planning
-- engine: Task lifecycle and orchestration
-- providers: AI provider integrations
-- security: Permissions and execution policies
-- tools: Approved tools
-- tests: Automated verification
-- workspace: Managed project files
-- logs: Execution audit records
-- backups: Recovery data
+## V1 capabilities
 
-## Execution Policy
+- Scan Python project modules and report syntax errors without executing scanned source files.
+- Build project context and inspect approved workspace files through a registered tool interface.
+- Run only explicitly registered test suites.
+- Track development tasks and their lifecycle.
+- Prepare and review controlled patch proposals; applying changes is a separate approval-gated action.
+- Keep backups and transaction journals for patch operations.
+- Recover interrupted patch transactions and deliver recovery audit events through a durable outbox.
+- Detect unfinished transactions, audit-chain problems, and cross-store inconsistencies with read-only health checks.
+- Keep plan execution bounded, revalidate plans before execution, block replay, and require separate approval for modifications.
+
+## Quick start
+
+Run commands from the repository root:
+
+```bash
+python main.py create "Inspect project health" --description "Run diagnostics and review failures."
+python main.py list
+python main.py diagnose
+python main.py health
+python main.py audit
+```
+
+Run the registered core test suite:
+
+```bash
+python main.py test
+```
+
+Run diagnostics with the full registered test suite:
+
+```bash
+python main.py diagnose --tests --test full
+```
+
+Inspect the registered tools and workspace:
+
+```bash
+python main.py tools registry
+python main.py tools list
+```
+
+The `health` command is read-only. It checks required directories, SQLite integrity, the audit hash chain, and patch/proposal consistency. It does not perform recovery or call AI providers.
+
+## Controlled patch workflow
+
+Patch proposal generation, review, approval, and application are separate operations:
+
+1. Inspect a proposal with `python main.py patches` and `python main.py patch-show PROPOSAL_ID`.
+2. Approve or reject it explicitly with `python main.py patch-approve PROPOSAL_ID` or `python main.py patch-reject PROPOSAL_ID`.
+3. Apply an approved proposal with `python main.py patch-apply PROPOSAL_ID`.
+4. Review diagnostics and audit records afterward.
+
+Patch application is policy-scoped, backed up, tested using a registered suite, and transactionally recoverable. Approval does not itself apply a patch.
+
+## Recovery
+
+Recovery is deliberately conservative. Do not confirm recovery while the original operation may still be running.
+
+- Patch transaction recovery: `python main.py recover-patch TRANSACTION_ID --confirm-stopped`
+- Patch/proposal state reconciliation: `python main.py reconcile-patch TRANSACTION_ID`
+- Interrupted plan marking: `python main.py recover-plan PLAN_ID --confirm-stopped`
+
+Plan recovery marks the execution interrupted and retains its lock. Automatic resume and replay are disabled; a human must inspect the situation before taking further action.
+
+## Safety boundaries
 
 1. No unrestricted shell execution.
-2. Only registered tests can execute automatically.
-3. Scoped file modifications require policy validation.
-4. Maximum five automatic repair attempts by default.
+2. Only registered test suites are eligible for automated execution.
+3. File modifications must pass policy validation and the controlled patch workflow.
+4. Automatic repair attempts are bounded (default maximum: five).
 5. Credential access is prohibited.
-6. Package installation requires approval.
+6. Package installation requires explicit approval.
 7. Deletion and deployment require approval.
 8. Network operations require approval.
 9. Real-money financial operations are prohibited.
-10. Every execution must produce auditable evidence.
+10. Execution and recovery events must leave auditable evidence.
 
-## Development status
+## Verification
 
-Initial foundation.
+GitHub Actions runs Python compilation and the complete unittest suite on pushes and pull requests using Python 3.12.
+
+Run the same checks locally with:
+
+```bash
+python -m compileall -q .
+python -m unittest discover -s tests -v
+```
+
+## Architecture
+
+- `core/`: shared primitives and audit support
+- `engine/`: task lifecycle, diagnostics, planning, transactions, and orchestration
+- `providers/`: preserved provider integrations for a later milestone
+- `security/`: permission and execution policies
+- `tools/`: approved tool support
+- `tests/`: automated verification
+- `workspace/`: managed project files
+- `logs/`: execution audit records
+- `backups/`: recovery data
