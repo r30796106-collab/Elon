@@ -252,6 +252,40 @@ class PlanExecutor:
         if task is None or task.get("id") != task_id:
             raise PlanExecutionError("Plan task does not exist.")
 
+        # A process may stop after the terminal plan record is saved but
+        # before the task status is synchronized. Reconcile that safe,
+        # idempotent tail on the next explicit execution attempt; never replay
+        # the plan's steps.
+        execution = record.get("execution")
+        if (
+            isinstance(execution, dict)
+            and execution.get("state") in ("completed", "failed")
+            and isinstance(execution.get("finished_at"), str)
+            and execution.get("finished_at")
+        ):
+            expected_status = (
+                "completed"
+                if execution["state"] == "completed"
+                else "failed"
+            )
+            if task.get("status") in ("pending", "in_progress"):
+                self.engine.update_task_status(task_id, expected_status)
+                self._audit("PLAN_TASK_STATUS_RECONCILED", {
+                    "plan_id": plan_id,
+                    "task_id": task_id,
+                    "state": execution["state"],
+                    "status": expected_status,
+                })
+            elif task.get("status") != expected_status:
+                raise PlanExecutionError(
+                    "Terminal plan execution conflicts with terminal task status; "
+                    "manual review is required."
+                )
+            raise PlanExecutionError(
+                "Plan already has a terminal execution record. "
+                "Task status was reconciled if needed; replay is blocked."
+            )
+
         if task.get("status") not in ("pending", "in_progress"):
             raise PlanExecutionError(
                 "Plan task is not active; only pending or in-progress tasks can execute."
