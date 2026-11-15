@@ -12,6 +12,7 @@ AI-provider integrations remain in the repository for a later, separate mileston
 - Run only explicitly registered test suites.
 - Track development tasks and their lifecycle.
 - Inspect Git branch, working-tree changes, diffs, and recent commits without modifying the repository.
+- Inspect Python/Node runtimes and declared dependencies without installing packages or using the network.
 - Generate bounded, deterministic read-only plans without an external AI provider.
 - Prepare and review controlled patch proposals; applying changes is a separate approval-gated action.
 - Keep backups and transaction journals for patch operations.
@@ -42,6 +43,12 @@ Run diagnostics with the full registered test suite:
 
 ```bash
 python main.py diagnose --tests --test full
+```
+
+Inspect runtime and dependency state without installing anything:
+
+```bash
+python main.py environment
 ```
 
 Inspect Git state without changing it:
