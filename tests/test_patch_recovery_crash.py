@@ -168,6 +168,49 @@ transaction.recover(transaction_id, confirm_stopped=True)
                 restarted_engine, transaction_id
             )
 
+    def test_restart_reconciles_status_after_audit_delivery_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            engine, target, old_data, _task_id, transaction_id = (
+                self._create_interrupted_case(root)
+            )
+            original_append = engine.audit.append
+
+            def fail_recovery_audit(event, details):
+                if event == "PATCH_TRANSACTION_RECOVERED":
+                    raise OSError("simulated audit storage failure")
+                return original_append(event, details)
+
+            engine.audit.append = fail_recovery_audit
+            with self.assertRaisesRegex(OSError, "simulated audit storage failure"):
+                PatchTransaction(engine).recover(
+                    transaction_id,
+                    confirm_stopped=True,
+                )
+
+            self.assertEqual(target.read_bytes(), old_data)
+            with engine._connect() as db:
+                status = db.execute(
+                    "SELECT status FROM patch_transactions WHERE transaction_id = ?",
+                    (transaction_id,),
+                ).fetchone()[0]
+            self.assertEqual(status, "recovery_required")
+
+            # Startup replay delivers the outbox event and reconciles the
+            # journal status because file restoration had already completed.
+            restarted_engine = TaskEngine(root)
+            PatchTransaction(restarted_engine)
+            with restarted_engine._connect() as db:
+                status, error = db.execute(
+                    "SELECT status, error FROM patch_transactions WHERE transaction_id = ?",
+                    (transaction_id,),
+                ).fetchone()
+            self.assertEqual(status, "rolled_back")
+            self.assertIsNone(error)
+            self._assert_one_recovery_audit_event(
+                restarted_engine, transaction_id
+            )
+
     def test_restart_after_crash_during_recovery(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
