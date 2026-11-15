@@ -8,8 +8,10 @@ class ProjectScanner:
     MAX_FILE_BYTES = 256 * 1024
 
     ALLOWED_ROOTS = {
-        "core", "engine", "providers",
-        "security", "tests", "workspace",
+        "core", "engine", "providers", "security", "tests",
+        "tools", "workspace", "src", "app", "lib",
+        "frontend", "backend", "scripts", "server", "client",
+        "test",
     }
 
     SKIP_DIRS = {
