@@ -26,7 +26,7 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 | 32 | Autonomous project testing | **Complete for bounded registered suites** | Registered test runner, full suite, health diagnostics, and GitHub Actions compile + unittest verification. |
 | 33 | Performance optimization | **Partial** | Added repeatable CI benchmarks and removed a second Python AST/file-read pass. Latest Ubuntu CI baseline (66 modules, 3 runs): Python scan median 0.149s versus 0.222s before optimization (~32.9% faster); context build 0.333s versus 0.363s (~8.3% faster). Android/Termux profiling remains. |
 | 34 | End-to-end autonomous developer testing | **Partial** | End-to-end offline plan → approval → execution, patch workflow integration, crash recovery tests. Full multi-file project-development scenarios remain. |
-| 35 | Production-readiness / security validation | **Partial** | Safety policy, read-only bridge, health/audit checks, protected-path rules, GitHub CI. Final packaging, device validation, operational runbook, and security review remain. |
+| 35 | Production-readiness / security validation | **Partial** | Safety policy, read-only bridge, health/audit checks, protected-path rules, strict persisted-plan/checkpoint validation, and GitHub CI. Final packaging, device validation, operational runbook, and security review remain. |
 
 ## Latest verification
 
