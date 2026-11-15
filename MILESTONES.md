@@ -26,13 +26,13 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 | 32 | Autonomous project testing | **Complete for bounded registered suites** | Registered test runner, full suite, health diagnostics, and GitHub Actions compile + unittest verification. |
 | 33 | Performance optimization | **Partial** | Added repeatable CI benchmarks and removed a second Python AST/file-read pass. Across repeated Ubuntu CI runs (66 modules, 3 runs each), Python scan medians ranged 0.149–0.180s versus the earlier 0.222s baseline (~19–33% faster). Context-build medians varied 0.333–0.396s versus a 0.363s baseline, so no consistent context-build improvement is claimed. Android/Termux profiling remains. |
 | 34 | End-to-end autonomous developer testing | **Partial** | End-to-end offline plan → approval → execution, patch workflow integration, crash recovery tests. Full multi-file project-development scenarios remain. |
-| 35 | Production-readiness / security validation | **Partial** | Safety policy, read-only bridge, health/audit checks, protected-path rules, strict persisted-plan/checkpoint validation, GitHub CI, and an operational runbook. Final packaging, Android/Termux device validation, and independent security review remain. |
+| 35 | Production-readiness / security validation | **Partial** | Safety policy, read-only bridge, health/audit checks, protected-path rules, strict persisted-plan/checkpoint validation, GitHub CI, an operational runbook, and a security controls/residual-risks review. Final packaging, Android/Termux device validation, and independent security review remain. |
 
 ## Latest verification
 
 - Development branch: `recovery-partial-audit-2026-11-15`
-- Latest verified commit: `88868d7f`
-- GitHub Actions run #207: compile and full unittest suite passed; **275 tests passed**.
+- Latest verified commit: `1e30f2b6`
+- GitHub Actions run #209: compile and full unittest suite passed; **275 tests passed**.
 - CI performance benchmark step passed.
 - Draft PR #1 contains the recovery milestone against `master`.
 - Draft PR #2 contains the follow-up offline planning, diagnostics, Git/environment inspection, and durability work against the development branch.
