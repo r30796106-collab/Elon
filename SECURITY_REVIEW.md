@@ -41,7 +41,7 @@ This is an internal engineering review, not an independent security certificatio
 - Plan and proposal files are locally stored; there is no external signature service or hardware-backed integrity key.
 - Plan approval and interruption-recovery operations need further concurrency review before multi-process production use.
 - JavaScript support is currently read-only diagnostics/import mapping; JavaScript code modification is not enabled.
-- New-file project generation is not enabled by the current protected modification policy.
+- Arbitrary new-file creation is not enabled through the patch workflow. The separate scaffold workflow is a narrow exception limited to fixed Python/JavaScript starter templates under `workspace/generated_projects/`, after explicit approval, with no-overwrite checks and recovery.
 - Git write operations, dependency installation, automatic deployment, and background scheduling are not enabled.
 - Gemini/Aider/OpenRouter integrations are preserved but paused; AI-dependent workflows have not been validated in this phase.
 - Android/Termux behavior has not been revalidated by the latest GitHub Actions runs.
