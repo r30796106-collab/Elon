@@ -11,6 +11,7 @@ AI-provider integrations remain in the repository for a later, separate mileston
 - Build project context and inspect approved workspace files through a registered tool interface.
 - Run only explicitly registered test suites.
 - Track development tasks and their lifecycle.
+- Inspect Git branch, working-tree changes, diffs, and recent commits without modifying the repository.
 - Generate bounded, deterministic read-only plans without an external AI provider.
 - Prepare and review controlled patch proposals; applying changes is a separate approval-gated action.
 - Keep backups and transaction journals for patch operations.
@@ -41,6 +42,14 @@ Run diagnostics with the full registered test suite:
 
 ```bash
 python main.py diagnose --tests --test full
+```
+
+Inspect Git state without changing it:
+
+```bash
+python main.py git status
+python main.py git diff
+python main.py git log --limit 10
 ```
 
 Inspect the registered tools and workspace:
