@@ -378,6 +378,7 @@ class PlanExecutor:
 
         results = []
         state = "failed"
+        started_event_written = False
 
         try:
             self._audit("PLAN_EXECUTION_STARTED", {
@@ -385,6 +386,7 @@ class PlanExecutor:
                 "task_id": task_id,
                 "plan_hash": record["plan_hash"],
             })
+            started_event_written = True
 
             state = "completed"
 
@@ -437,27 +439,31 @@ class PlanExecutor:
                     break
 
         finally:
-            record["execution"] = {
-                "state": state,
-                "started_at": record["execution"]["started_at"],
-                "finished_at": self.manager._now(),
-            }
+            # A failed STARTED audit append means no plan step has begun.
+            # Keep the durable claim non-terminal so explicit interruption
+            # recovery can handle it; do not mislabel the task as failed.
+            if started_event_written:
+                record["execution"] = {
+                    "state": state,
+                    "started_at": record["execution"]["started_at"],
+                    "finished_at": self.manager._now(),
+                }
 
-            self.manager._write(
-                self.manager._path(plan_id),
-                record,
-            )
+                self.manager._write(
+                    self.manager._path(plan_id),
+                    record,
+                )
 
-            # Synchronize task status after the terminal plan record is saved.
-            self.engine.update_task_status(
-                task_id,
-                "completed" if state == "completed" else "failed",
-            )
-            self._audit("PLAN_EXECUTION_FINISHED", {
-                "plan_id": plan_id,
-                "task_id": task_id,
-                "state": state,
-            })
+                # Synchronize task status after the terminal plan record is saved.
+                self.engine.update_task_status(
+                    task_id,
+                    "completed" if state == "completed" else "failed",
+                )
+                self._audit("PLAN_EXECUTION_FINISHED", {
+                    "plan_id": plan_id,
+                    "task_id": task_id,
+                    "state": state,
+                })
 
         return {
             "plan_id": plan_id,
