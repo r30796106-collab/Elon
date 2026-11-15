@@ -31,13 +31,14 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 ## Latest verification
 
 - Development branch: `recovery-partial-audit-2026-11-15`
-- Latest verified commit: `66c03569`
-- GitHub Actions run #275: compile and full unittest suite passed; **279 tests passed**; benchmark step passed.
-- JavaScript context/import and offline multi-file patch proposal tests passed.
-- CI performance benchmark step passed.
+- Latest verified branch commit: `fbd4af123b796a4af6857fcd87713470c4242023`
+- Latest GitHub Actions run #324 (pull-request validation): compile passed; full unittest suite passed; **295 tests passed**; read-only benchmark passed.
+- JavaScript context/import discovery without Node.js is covered by passing tests; Node.js syntax checking remains optional and parser-only.
+- Latest benchmark (3 iterations): Python project scan median 0.183s (70 modules); JavaScript scan median 0.00069s; health-check median 0.00063s; context-build median 0.242s (12 files selected). The current ELON repository contains no JavaScript project modules in this benchmark, so the context benchmark reports 0 JavaScript modules; dedicated fixture tests verify JavaScript context selection and imports.
 - Draft PR #1 contains the recovery milestone against `master`.
-- Draft PR #2 contains the follow-up offline planning, diagnostics, Git/environment inspection, and durability work against the development branch.
+- Draft PR #2 contains the follow-up offline planning, diagnostics, Git/environment inspection, JavaScript context discovery, and durability work against the development branch.
 - Neither PR is merged.
+
 
 ## Completion rule
 
