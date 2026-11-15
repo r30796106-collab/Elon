@@ -31,8 +31,8 @@ This roadmap tracks the agreed Phase 2 sequence (23–35). A milestone is marked
 ## Latest verification
 
 - Development branch: `recovery-partial-audit-2026-11-15`
-- Latest verified commit: `71db9343`
-- GitHub Actions run #271: compile and full unittest suite passed; **279 tests passed**; benchmark step passed.
+- Latest verified commit: `66c03569`
+- GitHub Actions run #275: compile and full unittest suite passed; **279 tests passed**; benchmark step passed.
 - JavaScript context/import and offline multi-file patch proposal tests passed.
 - CI performance benchmark step passed.
 - Draft PR #1 contains the recovery milestone against `master`.
