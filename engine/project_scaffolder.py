@@ -26,7 +26,7 @@ class ProjectScaffolder:
         self.workspace = self.root / "workspace"
         self.proposals = self.workspace / "scaffold_proposals"
         self.generated = self.workspace / "generated_projects"
-        self.audit = AuditLog(self.root)
+        self.audit = AuditLog(self.root / "logs" / "audit.jsonl")
 
     @staticmethod
     def _now():
