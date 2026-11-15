@@ -1,6 +1,7 @@
 import io
 import tempfile
 import unittest
+from unittest.mock import patch
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
