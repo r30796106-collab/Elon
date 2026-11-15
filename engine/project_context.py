@@ -58,7 +58,9 @@ class ProjectContextBuilder:
         allowed = (
             relative.parts[0] in {
                 "core", "engine", "providers", "tests",
-                "security", "workspace",
+                "security", "tools", "workspace", "src", "app",
+                "lib", "frontend", "backend", "scripts",
+                "server", "client", "test",
             }
             or relative.as_posix() == "main.py"
         )
@@ -210,8 +212,10 @@ class ProjectContextBuilder:
 
         is_test = (
             relative.startswith("tests/")
+            or relative.startswith("test/")
             or relative.startswith("workspace/test_")
             or relative.startswith("workspace/tests/")
+            or Path(relative).name.startswith("test_")
         )
 
         if is_test and score:
@@ -281,8 +285,6 @@ class ProjectContextBuilder:
         # Second pass: reward actual dependencies of strongly relevant
         # implementation modules. Do not let unrelated tests drive this.
         dependency_scores = {}
-        dependencies = scan.get("dependencies", {})
-
         for module, item in list(candidates.items()):
             if item["is_test"] or item["score"] < 6:
                 continue
@@ -368,8 +370,10 @@ class ProjectContextBuilder:
             item["module"]
             for item in selected
             if item["path"].startswith("tests/")
+            or item["path"].startswith("test/")
             or item["path"].startswith("workspace/test_")
             or item["path"].startswith("workspace/tests/")
+            or Path(item["path"]).name.startswith("test_")
         )
 
         impact = {}
