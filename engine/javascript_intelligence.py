@@ -257,7 +257,11 @@ class JavaScriptScanner:
                 dependents[target].add(source)
 
         return {
-            "status": (\n                "FAIL" if syntax_errors\n                else "WARN" if warnings\n                else "PASS"\n            ),
+            "status": (
+                "FAIL" if syntax_errors
+                else "WARN" if warnings
+                else "PASS"
+            ),
             "node_available": True,
             "files_scanned": len(modules),
             "modules": modules,
