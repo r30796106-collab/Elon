@@ -1,6 +1,7 @@
 import difflib
 import fcntl
 import hashlib
+import errno
 import json
 import os
 import re
@@ -117,8 +118,14 @@ class PatchApprovalManager:
             try:
                 directory_fd = os.open(self.directory, os.O_RDONLY)
                 os.fsync(directory_fd)
-            except OSError:
-                pass
+            except OSError as error:
+                # Ignore only filesystems that explicitly lack directory fsync.
+                if error.errno not in (
+                    errno.EINVAL,
+                    errno.ENOTSUP,
+                    errno.EBADF,
+                ):
+                    raise
             finally:
                 if directory_fd is not None:
                     os.close(directory_fd)
