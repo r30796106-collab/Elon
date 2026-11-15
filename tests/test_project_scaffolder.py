@@ -66,7 +66,7 @@ class ProjectScaffolderTests(unittest.TestCase):
         self.scaffolder.apply(record["proposal_id"])
 
         target = self.root / "workspace" / "generated_projects" / "sample_app"
-        (target / "main.py").write_text("print('changed')\\n", encoding="utf-8")
+        (target / "main.py").write_text("print('changed')\n", encoding="utf-8")
         (target / "extra.txt").write_text("unexpected", encoding="utf-8")
 
         report = self.scaffolder.verify(record["proposal_id"])
