@@ -90,12 +90,12 @@ Patch proposals are separate from read-only plans. A multi-file proposal can be 
     {
       "path": "workspace/app.py",
       "expected_sha256": "64-character SHA-256 of the current file",
-      "content": "VALUE = 2\\n"
+      "content": "VALUE = 2\n"
     },
     {
       "path": "workspace/helpers.py",
       "expected_sha256": "64-character SHA-256 of the current file",
-      "content": "OFFSET = 3\\n"
+      "content": "OFFSET = 3\n"
     }
   ]
 }
