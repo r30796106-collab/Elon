@@ -101,6 +101,41 @@ class ElonCoreTests(unittest.TestCase):
         self.engine.create_task("Audit test")
         self.assertTrue(self.engine.audit_valid())
 
+    def test_task_status_rejects_unknown_value(self):
+        task_id = self.engine.create_task("Status validation")
+
+        with self.assertRaises(ValueError):
+            self.engine.update_task_status(task_id, "running")
+
+        self.assertEqual(self.engine.get_task(task_id)["status"], "pending")
+
+    def test_cancelled_task_status_is_terminal(self):
+        task_id = self.engine.create_task("Cancelled task")
+        self.engine.update_task_status(task_id, "cancelled")
+
+        with self.assertRaises(ValueError):
+            self.engine.update_task_status(task_id, "pending")
+
+        self.assertEqual(self.engine.get_task(task_id)["status"], "cancelled")
+
+    def test_completed_task_status_is_terminal(self):
+        task_id = self.engine.create_task("Completed task")
+        self.engine.update_task_status(task_id, "completed")
+
+        with self.assertRaises(ValueError):
+            self.engine.update_task_status(task_id, "in_progress")
+
+        self.assertEqual(self.engine.get_task(task_id)["status"], "completed")
+
+    def test_failed_task_can_be_retried(self):
+        task_id = self.engine.create_task("Retry failed task")
+        self.engine.update_task_status(task_id, "failed")
+
+        result = self.engine.update_task_status(task_id, "in_progress")
+
+        self.assertEqual(result["status"], "in_progress")
+
+
     def test_unregistered_test_blocked(self):
         with self.assertRaises(PolicyError):
             self.engine.run_registered_tests("unknown")
