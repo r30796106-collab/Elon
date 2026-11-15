@@ -317,22 +317,25 @@ class PlanExecutor:
                         "status": expected_status,
                     })
                 self.engine.update_task_status(task_id, expected_status)
-            elif task.get("status") == expected_status:
-                if not self._audit_contains_event(
-                    "PLAN_TASK_STATUS_RECONCILED",
-                    plan_id,
-                ):
-                    self._audit("PLAN_TASK_STATUS_RECONCILED", {
-                        "plan_id": plan_id,
-                        "task_id": task_id,
-                        "state": execution["state"],
-                        "status": expected_status,
-                    })
             elif task.get("status") != expected_status:
                 raise PlanExecutionError(
                     "Terminal plan execution conflicts with terminal task status; "
                     "manual review is required."
                 )
+
+            # The terminal plan record and task status are durable before this
+            # event. Retry the event independently if audit append previously
+            # failed, without replaying any execution steps.
+            if not self._audit_contains_event(
+                "PLAN_EXECUTION_FINISHED",
+                plan_id,
+            ):
+                self._audit("PLAN_EXECUTION_FINISHED", {
+                    "plan_id": plan_id,
+                    "task_id": task_id,
+                    "state": execution["state"],
+                })
+
             raise PlanExecutionError(
                 "Plan already has a terminal execution record. "
                 "Task status was reconciled if needed; replay is blocked."
