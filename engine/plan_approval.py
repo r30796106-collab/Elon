@@ -31,6 +31,26 @@ class PlanApprovalManager:
     def _now():
         return datetime.now(timezone.utc).isoformat()
 
+    def _fsync_audit_log(self):
+        path = self.audit.path
+        with path.open("rb") as handle:
+            os.fsync(handle.fileno())
+
+        descriptor = None
+        try:
+            descriptor = os.open(str(path.parent), os.O_RDONLY)
+            os.fsync(descriptor)
+        except OSError as error:
+            if error.errno not in (
+                errno.EINVAL,
+                errno.ENOTSUP,
+                errno.EBADF,
+            ):
+                raise
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
     @staticmethod
     def _digest(plan):
         return AuditLog.digest(plan)
@@ -166,6 +186,7 @@ class PlanApprovalManager:
             "task_id": task_id,
             "plan_hash": record["plan_hash"],
         })
+        self._fsync_audit_log()
 
         return record
 
@@ -274,6 +295,7 @@ class PlanApprovalManager:
                 "plan_hash": record["plan_hash"],
                 "lock_retained": True,
             })
+        self._fsync_audit_log()
 
         record["execution"] = {
             "state": "interrupted",
@@ -320,6 +342,7 @@ class PlanApprovalManager:
                 "plan_hash": record["plan_hash"],
             },
         )
+        self._fsync_audit_log()
 
         return record
 
