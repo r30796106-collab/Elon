@@ -32,6 +32,7 @@ class TaskEngine:
         self.db_path = self.root / "elon.sqlite3"
 
         self._initialize_database()
+        self._flush_task_lifecycle_audit_outbox()
         self._flush_task_status_audit_outbox()
 
     @contextmanager
@@ -96,6 +97,16 @@ class TaskEngine:
             """)
 
             db.execute("""
+                CREATE TABLE IF NOT EXISTS task_lifecycle_audit_outbox (
+                    event_id TEXT PRIMARY KEY,
+                    event_name TEXT NOT NULL,
+                    details_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    delivered_at TEXT
+                )
+            """)
+
+            db.execute("""
                 CREATE TABLE IF NOT EXISTS task_status_audit_outbox (
                     event_id TEXT PRIMARY KEY,
                     task_id INTEGER NOT NULL,
@@ -154,28 +165,68 @@ class TaskEngine:
                 )
 
 
+    def _flush_task_lifecycle_audit_outbox(self):
+        """Deliver durable task-created/completed audit events exactly once."""
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not self.audit.verify():
+                raise RuntimeError(
+                    "Audit chain is invalid; task lifecycle events remain pending"
+                )
+
+            rows = db.execute(
+                """SELECT event_id, event_name, details_json
+                FROM task_lifecycle_audit_outbox
+                WHERE delivered_at IS NULL
+                ORDER BY created_at, event_id"""
+            ).fetchall()
+            delivered_ids = set()
+            if self.audit.path.exists():
+                for line in self.audit.path.read_text(encoding="utf-8").splitlines():
+                    if not line.strip():
+                        continue
+                    record = json.loads(line)
+                    details = record.get("details")
+                    if isinstance(details, dict) and details.get("task_lifecycle_event_id"):
+                        delivered_ids.add(details["task_lifecycle_event_id"])
+
+            for event_id, event_name, details_json in rows:
+                if event_id not in delivered_ids:
+                    details = json.loads(details_json)
+                    details["task_lifecycle_event_id"] = event_id
+                    self.audit.append(event_name, details)
+                db.execute(
+                    """UPDATE task_lifecycle_audit_outbox
+                    SET delivered_at = ?
+                    WHERE event_id = ? AND delivered_at IS NULL""",
+                    (datetime.now(timezone.utc).isoformat(), event_id),
+                )
     def create_task(self, title, description=""):
         if not isinstance(title, str) or not title.strip():
             raise ValueError("Task title cannot be empty")
-
+        if not isinstance(description, str):
+            raise ValueError("Task description must be text")
         if len(title) > 200 or len(description) > 5000:
             raise ValueError("Task description too long")
 
+        event_id = uuid.uuid4().hex
         with self._connect() as db:
             cursor = db.execute(
                 """INSERT INTO tasks
                 (title, description, status, created_at)
                 VALUES (?, ?, ?, ?)""",
-                (
-                    title.strip(),
-                    description,
-                    "pending",
-                    datetime.now(timezone.utc).isoformat()
-                )
+                (title.strip(), description, "pending", datetime.now(timezone.utc).isoformat()),
             )
             task_id = cursor.lastrowid
+            db.execute(
+                """INSERT INTO task_lifecycle_audit_outbox
+                (event_id, event_name, details_json, created_at)
+                VALUES (?, ?, ?, ?)""",
+                (event_id, "TASK_CREATED", json.dumps({"task_id": task_id}, sort_keys=True),
+                 datetime.now(timezone.utc).isoformat()),
+            )
 
-        self.audit.append("TASK_CREATED", {"task_id": task_id})
+        self._flush_task_lifecycle_audit_outbox()
         return task_id
 
     def get_task(self, task_id):
@@ -391,17 +442,23 @@ class TaskEngine:
         return self.get_task(task_id)
 
     def complete_task(self, task_id):
+        event_id = uuid.uuid4().hex
         with self._connect() as db:
             cursor = db.execute(
                 """UPDATE tasks SET status = 'completed'
                 WHERE id = ? AND status NOT IN ('completed', 'cancelled')""",
-                (task_id,)
+                (task_id,),
             )
-
-        if cursor.rowcount == 0:
-            raise ValueError("Task unavailable or already completed")
-
-        self.audit.append("TASK_COMPLETED", {"task_id": task_id})
+            if cursor.rowcount == 0:
+                raise ValueError("Task unavailable or already completed")
+            db.execute(
+                """INSERT INTO task_lifecycle_audit_outbox
+                (event_id, event_name, details_json, created_at)
+                VALUES (?, ?, ?, ?)""",
+                (event_id, "TASK_COMPLETED", json.dumps({"task_id": task_id}, sort_keys=True),
+                 datetime.now(timezone.utc).isoformat()),
+            )
+        self._flush_task_lifecycle_audit_outbox()
 
     def audit_valid(self):
         return self.audit.verify()
