@@ -138,6 +138,42 @@ class ElonCoreTests(unittest.TestCase):
         self.assertEqual(result["status"], "in_progress")
 
 
+    def test_concurrent_terminal_updates_cannot_overwrite_each_other(self):
+        import threading
+
+        task_id = self.engine.create_task("Concurrent terminal update")
+        barrier = threading.Barrier(2)
+        outcomes = []
+        outcome_lock = threading.Lock()
+
+        def update(status):
+            barrier.wait(timeout=3)
+            try:
+                self.engine.update_task_status(task_id, status)
+                result = (status, True)
+            except ValueError:
+                result = (status, False)
+            with outcome_lock:
+                outcomes.append(result)
+
+        threads = [
+            threading.Thread(target=update, args=("completed",)),
+            threading.Thread(target=update, args=("cancelled",)),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+
+        self.assertEqual(sum(success for _, success in outcomes), 1)
+        final_status = self.engine.get_task(task_id)["status"]
+        self.assertIn(final_status, ("completed", "cancelled"))
+        self.assertEqual(
+            final_status,
+            next(status for status, success in outcomes if success),
+        )
+
     def test_unregistered_test_blocked(self):
         with self.assertRaises(PolicyError):
             self.engine.run_registered_tests("unknown")
