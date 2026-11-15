@@ -79,7 +79,35 @@ Execution is not performed by `plan` or `plan-approve`. The execution command is
 
 ## Patch workflow
 
-Patch proposals are separate from read-only plans. Review the complete patch before approval:
+Patch proposals are separate from read-only plans. A multi-file proposal can be prepared without an AI provider by placing a JSON file under `workspace/`:
+
+```json
+{
+  "task_id": 1,
+  "summary": "Update two related modules",
+  "test_name": "full",
+  "patches": [
+    {
+      "path": "workspace/app.py",
+      "expected_sha256": "64-character SHA-256 of the current file",
+      "content": "VALUE = 2\\n"
+    },
+    {
+      "path": "workspace/helpers.py",
+      "expected_sha256": "64-character SHA-256 of the current file",
+      "content": "OFFSET = 3\\n"
+    }
+  ]
+}
+```
+
+Submit it as a pending proposal; this does not change source files:
+
+```bash
+python main.py patch-propose-json workspace/proposal.json
+```
+
+Review the complete patch before approval:
 
 ```bash
 python main.py patches
