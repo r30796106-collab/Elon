@@ -86,6 +86,29 @@ class HealthCheckTests(unittest.TestCase):
                 for item in consistency["warnings"])
         )
 
+    def test_pending_task_outboxes_warn_without_writing(self):
+        with closing(sqlite3.connect(self.root / "elon.sqlite3")) as db:
+            db.execute("""CREATE TABLE task_status_audit_outbox (
+                event_id TEXT PRIMARY KEY, delivered_at TEXT
+            )""")
+            db.execute("""CREATE TABLE task_lifecycle_audit_outbox (
+                event_id TEXT PRIMARY KEY, delivered_at TEXT
+            )""")
+            db.execute("INSERT INTO task_status_audit_outbox VALUES (?, NULL)", ("status-event",))
+            db.execute("INSERT INTO task_lifecycle_audit_outbox VALUES (?, NULL)", ("lifecycle-event",))
+            db.commit()
+
+        report = HealthChecker(self.root).run()
+        warnings = report["checks"]["consistency"]["warnings"]
+        self.assertEqual(report["status"], "WARN")
+        self.assertTrue(any("task_status_audit_outbox" in item for item in warnings))
+        self.assertTrue(any("task_lifecycle_audit_outbox" in item for item in warnings))
+
+        with closing(sqlite3.connect(self.root / "elon.sqlite3")) as db:
+            remaining = db.execute(
+                "SELECT COUNT(*) FROM task_status_audit_outbox WHERE delivered_at IS NULL"
+            ).fetchone()[0]
+        self.assertEqual(remaining, 1)
     def test_corrupt_audit_fails(self):
         path = self.root / "logs" / "audit.jsonl"
         path.write_text("{broken json\n", encoding="utf-8")

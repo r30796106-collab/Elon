@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 from engine.project_intelligence import ProjectScanner
+from engine.javascript_intelligence import JavaScriptScanner
 
 
 class ProjectContextBuilder:
@@ -57,7 +58,9 @@ class ProjectContextBuilder:
         allowed = (
             relative.parts[0] in {
                 "core", "engine", "providers", "tests",
-                "security", "workspace",
+                "security", "tools", "workspace", "src", "app",
+                "lib", "frontend", "backend", "scripts",
+                "server", "client", "test",
             }
             or relative.as_posix() == "main.py"
         )
@@ -75,7 +78,7 @@ class ProjectContextBuilder:
         if any(word in filename for word in self.EXCLUDED_NAME_PARTS):
             return None
 
-        if relative.suffix != ".py":
+        if relative.suffix.lower() not in {".py", ".js", ".mjs", ".cjs"}:
             return None
 
         path = self.root / relative
@@ -126,7 +129,42 @@ class ProjectContextBuilder:
 
         return sorted(set(word for word in words if word not in ignored))
 
-    def _extract_symbols(self, source):
+    def _extract_symbols(self, source, relative_path=None):
+        suffix = Path(relative_path or "").suffix.lower()
+        if suffix in {".js", ".mjs", ".cjs"}:
+            patterns = (
+                (
+                    re.compile(
+                        r"\b(?:export\s+)?(?:default\s+)?"
+                        r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)"
+                    ),
+                    "function",
+                ),
+                (
+                    re.compile(r"\bclass\s+([A-Za-z_$][\w$]*)"),
+                    "class",
+                ),
+                (
+                    re.compile(
+                        r"\b(?:export\s+)?(?:const|let|var)\s+"
+                        r"([A-Za-z_$][\w$]*)\s*="
+                    ),
+                    "variable",
+                ),
+            )
+            symbols = []
+            for pattern, kind in patterns:
+                for match in pattern.finditer(source):
+                    symbols.append({
+                        "name": match.group(1),
+                        "kind": kind,
+                        "line": source.count("\n", 0, match.start()) + 1,
+                    })
+            return sorted(
+                symbols,
+                key=lambda item: (item["line"], item["name"]),
+            )
+
         try:
             tree = ast.parse(source)
         except SyntaxError:
@@ -170,21 +208,32 @@ class ProjectContextBuilder:
         return aliases.get(term.lower(), term.lower())
 
     def _term_set(self, text):
-        # Split snake_case identifiers so their individual words can match.
+        # Split snake_case and CamelCase identifiers for task matching.
+        text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)
         text = text.replace("_", " ")
         words = re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", text.lower())
         return {self._normalize_term(word) for word in words}
 
-    def _score_candidate(self, module, relative, source, keywords):
+    def _score_candidate(
+        self,
+        module,
+        relative,
+        source,
+        keywords,
+        precomputed_symbols=None,
+    ):
         """Score path, identifiers, source content and test relevance."""
         task_terms = {self._normalize_term(word) for word in keywords}
         path_terms = self._term_set(module + " " + relative)
         source_terms = self._term_set(source)
 
-        try:
-            symbols = self._extract_symbols(source)
-        except (SyntaxError, ValueError):
-            symbols = []
+        if precomputed_symbols is not None:
+            symbols = precomputed_symbols
+        else:
+            try:
+                symbols = self._extract_symbols(source, relative)
+            except (SyntaxError, ValueError):
+                symbols = []
 
         symbol_terms = set()
         for symbol in symbols:
@@ -202,8 +251,10 @@ class ProjectContextBuilder:
 
         is_test = (
             relative.startswith("tests/")
+            or relative.startswith("test/")
             or relative.startswith("workspace/test_")
             or relative.startswith("workspace/tests/")
+            or Path(relative).name.startswith("test_")
         )
 
         if is_test and score:
@@ -229,11 +280,24 @@ class ProjectContextBuilder:
     def build(self, task):
         keywords = self._keywords(task)
         scan = self.scanner.scan()
+        javascript = JavaScriptScanner(self.root).scan()
         warnings = []
         candidates = {}
 
-        # First pass: score every safe, readable Python module.
-        for module, metadata in scan["modules"].items():
+        if javascript.get("status") == "WARN":
+            warnings.append(javascript.get("message", "JavaScript scan was skipped."))
+        for error in javascript.get("syntax_errors", []):
+            warnings.append(
+                f"JavaScript syntax error in {error.get('path', 'unknown file')}"
+            )
+
+        all_modules = dict(scan.get("modules", {}))
+        all_modules.update(javascript.get("modules", {}))
+        all_dependencies = dict(scan.get("dependencies", {}))
+        all_dependencies.update(javascript.get("dependencies", {}))
+
+        # First pass: score every safe, readable Python or JavaScript module.
+        for module, metadata in all_modules.items():
             relative = metadata["path"]
             path = self._safe_path(relative)
 
@@ -251,7 +315,11 @@ class ProjectContextBuilder:
                 continue
 
             item = self._score_candidate(
-                module, relative, source, keywords
+                module,
+                relative,
+                source,
+                keywords,
+                metadata.get("symbols"),
             )
 
             if item["score"] > 0:
@@ -260,17 +328,15 @@ class ProjectContextBuilder:
         # Second pass: reward actual dependencies of strongly relevant
         # implementation modules. Do not let unrelated tests drive this.
         dependency_scores = {}
-        dependencies = scan.get("dependencies", {})
-
         for module, item in list(candidates.items()):
             if item["is_test"] or item["score"] < 6:
                 continue
 
-            for dependency in dependencies.get(module, []):
+            for dependency in all_dependencies.get(module, []):
                 # A useful helper may have no direct keyword match.
                 # Safely load it before assigning its dependency bonus.
                 if dependency not in candidates:
-                    metadata = scan["modules"].get(dependency)
+                    metadata = all_modules.get(dependency)
                     if metadata is None:
                         continue
 
@@ -285,7 +351,11 @@ class ProjectContextBuilder:
                         continue
 
                     candidates[dependency] = self._score_candidate(
-                        dependency, relative, helper_source, keywords
+                        dependency,
+                        relative,
+                        helper_source,
+                        keywords,
+                        metadata.get("symbols"),
                     )
 
                 dependency_scores[dependency] = (
@@ -347,13 +417,28 @@ class ProjectContextBuilder:
             item["module"]
             for item in selected
             if item["path"].startswith("tests/")
+            or item["path"].startswith("test/")
             or item["path"].startswith("workspace/test_")
             or item["path"].startswith("workspace/tests/")
+            or Path(item["path"]).name.startswith("test_")
         )
 
         impact = {}
         for module in sorted(selected_modules):
-            impact[module] = self.scanner.analyze_impact(module, scan)
+            if module in scan.get("modules", {}):
+                impact[module] = self.scanner.analyze_impact(module, scan)
+            else:
+                module_dependencies = all_dependencies.get(module, [])
+                module_dependents = sorted(
+                    source
+                    for source, targets in all_dependencies.items()
+                    if module in targets
+                )
+                impact[module] = {
+                    "language": "javascript",
+                    "dependencies": module_dependencies,
+                    "dependents": module_dependents,
+                }
 
         return {
             "success": True,
@@ -365,6 +450,8 @@ class ProjectContextBuilder:
             "summary": {
                 "files_selected": len(selected),
                 "bytes_selected": total_bytes,
-                "modules_scanned": scan["summary"]["modules_scanned"],
+                "modules_scanned": len(all_modules),
+                "python_modules_scanned": scan["summary"]["modules_scanned"],
+                "javascript_modules_scanned": javascript.get("files_scanned", 0),
             },
         }

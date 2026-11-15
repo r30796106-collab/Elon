@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -42,6 +43,24 @@ class TestPlanApproval(unittest.TestCase):
     def save(self):
         return self.manager.save_plan(1, VALID_PLAN)
 
+    def test_plan_write_fsyncs_file_before_returning(self):
+        record = self.save()
+        record["durability_probe"] = True
+        path = self.manager._path(record["plan_id"])
+
+        from unittest.mock import patch
+        with patch(
+            "engine.plan_approval.os.fsync",
+            wraps=os.fsync,
+        ) as sync:
+            self.manager._write(path, record)
+
+        self.assertGreaterEqual(sync.call_count, 1)
+        self.assertTrue(path.is_file())
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertTrue(saved["durability_probe"])
+        self.assertEqual(saved["plan_hash"], record["plan_hash"])
+
     def test_save_plan_pending(self):
         record = self.save()
         self.assertEqual(record["status"], "pending")
@@ -55,6 +74,69 @@ class TestPlanApproval(unittest.TestCase):
         record = self.save()
         result = self.manager.approve(record["plan_id"])
         self.assertEqual(result["status"], "approved")
+        self.assertTrue(self.manager.audit.verify())
+
+    def test_invalid_execution_checkpoint_is_rejected(self):
+        record = self.save()
+        record["execution"] = {
+            "state": "claimed",
+            "started_at": self.manager._now(),
+            "finished_at": None,
+            "completed_steps": [999],
+        }
+        self.manager._write(
+            self.manager._path(record["plan_id"]),
+            record,
+        )
+
+        with self.assertRaisesRegex(
+            PlanApprovalError,
+            "completed-step checkpoint",
+        ):
+            self.manager.get_plan(record["plan_id"])
+
+    def test_plan_approval_retries_after_write_failure_without_duplicate_audit(self):
+        record = self.save()
+        original_write = self.manager._write
+        failed = {"value": False}
+
+        def fail_write_once(path, value):
+            if not failed["value"]:
+                failed["value"] = True
+                raise OSError("simulated plan approval write failure")
+            return original_write(path, value)
+
+        from unittest.mock import patch
+        with patch.object(
+            self.manager,
+            "_write",
+            side_effect=fail_write_once,
+        ):
+            with self.assertRaisesRegex(
+                OSError,
+                "plan approval write failure",
+            ):
+                self.manager.approve(record["plan_id"])
+
+            self.assertEqual(
+                self.manager.get_plan(record["plan_id"])["status"],
+                "pending",
+            )
+            approved = self.manager.approve(record["plan_id"])
+
+        self.assertEqual(approved["status"], "approved")
+        audit_lines = [
+            json.loads(line)
+            for line in (self.root / "logs" / "audit.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        matching = [
+            item for item in audit_lines
+            if item.get("event") == "PLAN_APPROVED"
+            and item.get("details", {}).get("plan_id") == record["plan_id"]
+        ]
+        self.assertEqual(len(matching), 1)
         self.assertTrue(self.manager.audit.verify())
 
     def test_reject_plan(self):
@@ -125,6 +207,68 @@ class TestPlanApproval(unittest.TestCase):
             record,
         )
         return record, lock
+
+    def test_interrupted_recovery_rebuilds_checkpoint_from_audit(self):
+        record, lock = self.make_claimed_execution()
+        self.manager.audit.append(
+            "PLAN_STEP_COMPLETED",
+            {
+                "plan_id": record["plan_id"],
+                "task_id": record["task_id"],
+                "step_id": 2,
+                "step_type": "inspect",
+            },
+        )
+        self.manager._fsync_audit_log()
+
+        recovered = self.manager.mark_interrupted(
+            record["plan_id"],
+            confirm_stopped=True,
+        )
+
+        self.assertEqual(
+            recovered["execution"]["completed_steps"],
+            [2],
+        )
+        self.assertEqual(
+            recovered["execution"]["last_completed_step"],
+            2,
+        )
+        self.assertEqual(
+            recovered["execution"]["state"],
+            "interrupted",
+        )
+        self.assertTrue(lock.exists())
+
+    def test_interrupted_recovery_preserves_completed_step_checkpoints(self):
+        record, lock = self.make_claimed_execution()
+        record["execution"]["completed_steps"] = [1]
+        record["execution"]["last_completed_step"] = 1
+        record["execution"]["last_checkpoint_state"] = "completed"
+        record["execution"]["last_checkpoint_at"] = self.manager._now()
+        self.manager._write(
+            self.manager._path(record["plan_id"]),
+            record,
+        )
+
+        recovered = self.manager.mark_interrupted(
+            record["plan_id"],
+            confirm_stopped=True,
+        )
+
+        self.assertEqual(
+            recovered["execution"]["state"],
+            "interrupted",
+        )
+        self.assertEqual(
+            recovered["execution"]["completed_steps"],
+            [1],
+        )
+        self.assertEqual(
+            recovered["execution"]["last_completed_step"],
+            1,
+        )
+        self.assertTrue(lock.exists())
 
     def test_recovery_marks_orphaned_execution_lock_interrupted(self):
         record = self.save()
@@ -199,6 +343,108 @@ class TestPlanApproval(unittest.TestCase):
                 "claimed",
             )
 
+            recovered = self.manager.mark_interrupted(
+                record["plan_id"],
+                confirm_stopped=True,
+            )
+
+        self.assertEqual(recovered["execution"]["state"], "interrupted")
+        self.assertTrue(lock.exists())
+        audit_lines = [
+            json.loads(line)
+            for line in (self.root / "logs" / "audit.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        matching = [
+            item for item in audit_lines
+            if item.get("event") == "PLAN_EXECUTION_INTERRUPTED"
+            and item.get("details", {}).get("plan_id") == record["plan_id"]
+        ]
+        self.assertEqual(len(matching), 1)
+        self.assertTrue(self.manager.audit.verify())
+
+    def test_interrupted_audit_append_then_raise_is_idempotent(self):
+        record, lock = self.make_claimed_execution()
+        original_append = self.manager.audit.append
+        failed = {"value": False}
+
+        def append_then_fail(event, details):
+            result = original_append(event, details)
+            if (
+                event == "PLAN_EXECUTION_INTERRUPTED"
+                and not failed["value"]
+            ):
+                failed["value"] = True
+                raise OSError("simulated post-append audit failure")
+            return result
+
+        from unittest.mock import patch
+        with patch.object(
+            self.manager.audit,
+            "append",
+            side_effect=append_then_fail,
+        ):
+            with self.assertRaises(OSError):
+                self.manager.mark_interrupted(
+                    record["plan_id"],
+                    confirm_stopped=True,
+                )
+
+            saved = self.manager.get_plan(record["plan_id"])
+            self.assertEqual(saved["execution"]["state"], "claimed")
+
+            recovered = self.manager.mark_interrupted(
+                record["plan_id"],
+                confirm_stopped=True,
+            )
+
+        self.assertEqual(recovered["execution"]["state"], "interrupted")
+        self.assertTrue(lock.exists())
+        audit_lines = [
+            json.loads(line)
+            for line in (self.root / "logs" / "audit.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        matching = [
+            item for item in audit_lines
+            if item.get("event") == "PLAN_EXECUTION_INTERRUPTED"
+            and item.get("details", {}).get("plan_id") == record["plan_id"]
+        ]
+        self.assertEqual(len(matching), 1)
+        self.assertTrue(self.manager.audit.verify())
+
+    def test_interrupted_audit_sync_failure_retries_without_duplicate_event(self):
+        record, lock = self.make_claimed_execution()
+        original_sync = self.manager._fsync_audit_log
+        failed = {"value": False}
+
+        def fail_sync_once():
+            if not failed["value"]:
+                failed["value"] = True
+                raise OSError("simulated interruption audit sync failure")
+            return original_sync()
+
+        from unittest.mock import patch
+        with patch.object(
+            self.manager,
+            "_fsync_audit_log",
+            side_effect=fail_sync_once,
+        ):
+            with self.assertRaisesRegex(
+                OSError,
+                "interruption audit sync failure",
+            ):
+                self.manager.mark_interrupted(
+                    record["plan_id"],
+                    confirm_stopped=True,
+                )
+
+            self.assertEqual(
+                self.manager.get_plan(record["plan_id"])["execution"]["state"],
+                "claimed",
+            )
             recovered = self.manager.mark_interrupted(
                 record["plan_id"],
                 confirm_stopped=True,

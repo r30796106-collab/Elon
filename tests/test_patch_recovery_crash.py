@@ -212,6 +212,60 @@ transaction.recover(transaction_id, confirm_stopped=True)
                 restarted_engine, transaction_id
             )
 
+    def test_audit_sync_failure_keeps_outbox_pending_for_restart(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            engine, target, old_data, _task_id, transaction_id = (
+                self._create_interrupted_case(root)
+            )
+            transaction = PatchTransaction(engine)
+            original_sync = transaction._fsync_audit_log
+            failed = {"value": False}
+
+            def fail_sync_once():
+                if not failed["value"]:
+                    failed["value"] = True
+                    raise OSError("simulated audit fsync failure")
+                return original_sync()
+
+            transaction._fsync_audit_log = fail_sync_once
+            with self.assertRaisesRegex(OSError, "audit fsync failure"):
+                transaction.recover(
+                    transaction_id,
+                    confirm_stopped=True,
+                )
+
+            self.assertEqual(target.read_bytes(), old_data)
+            with engine._connect() as db:
+                delivered_at, status = db.execute(
+                    """SELECT o.delivered_at, t.status
+                       FROM patch_recovery_audit_outbox o
+                       JOIN patch_transactions t
+                         ON t.transaction_id = o.transaction_id
+                       WHERE o.transaction_id = ?""",
+                    (transaction_id,),
+                ).fetchone()
+            self.assertIsNone(delivered_at)
+            self.assertEqual(status, "recovery_required")
+
+            restarted_engine = TaskEngine(root)
+            PatchTransaction(restarted_engine)
+            with restarted_engine._connect() as db:
+                delivered_at, status = db.execute(
+                    """SELECT o.delivered_at, t.status
+                       FROM patch_recovery_audit_outbox o
+                       JOIN patch_transactions t
+                         ON t.transaction_id = o.transaction_id
+                       WHERE o.transaction_id = ?""",
+                    (transaction_id,),
+                ).fetchone()
+            self.assertIsNotNone(delivered_at)
+            self.assertEqual(status, "rolled_back")
+            self._assert_one_recovery_audit_event(
+                restarted_engine,
+                transaction_id,
+            )
+
     def test_restart_after_crash_during_recovery(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

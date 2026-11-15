@@ -117,6 +117,20 @@ class LocalBridgeTests(unittest.TestCase):
 
         return status, data
 
+    def test_bridge_bounds_request_resources(self):
+        self.assertEqual(
+            self.bridge.REQUEST_TIMEOUT_SECONDS,
+            10,
+        )
+        self.assertEqual(
+            self.bridge.MAX_CONCURRENT_REQUESTS,
+            16,
+        )
+        self.assertEqual(
+            self.bridge.server.request_slots._value,
+            self.bridge.MAX_CONCURRENT_REQUESTS,
+        )
+
     def test_bridge_binds_to_localhost(self):
         self.assertEqual(
             self.bridge.server.server_address[0],

@@ -1,5 +1,6 @@
 """Persistent, hash-verified review and approval for validated plans."""
 
+import errno
 import json
 import os
 import re
@@ -29,6 +30,26 @@ class PlanApprovalManager:
     @staticmethod
     def _now():
         return datetime.now(timezone.utc).isoformat()
+
+    def _fsync_audit_log(self):
+        path = self.audit.path
+        with path.open("rb") as handle:
+            os.fsync(handle.fileno())
+
+        descriptor = None
+        try:
+            descriptor = os.open(str(path.parent), os.O_RDONLY)
+            os.fsync(descriptor)
+        except OSError as error:
+            if error.errno not in (
+                errno.EINVAL,
+                errno.ENOTSUP,
+                errno.EBADF,
+            ):
+                raise
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
 
     @staticmethod
     def _digest(plan):
@@ -61,8 +82,28 @@ class PlanApprovalManager:
                 temporary = Path(handle.name)
                 json.dump(record, handle, ensure_ascii=False, indent=2)
                 handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
 
             os.replace(temporary, path)
+
+            # Persist the directory entry where supported so the atomic
+            # replacement survives an abrupt process/device restart.
+            directory_fd = None
+            try:
+                directory_fd = os.open(self.directory, os.O_RDONLY)
+                os.fsync(directory_fd)
+            except OSError as error:
+                # Ignore only filesystems that explicitly lack directory fsync.
+                if error.errno not in (
+                    errno.EINVAL,
+                    errno.ENOTSUP,
+                    errno.EBADF,
+                ):
+                    raise
+            finally:
+                if directory_fd is not None:
+                    os.close(directory_fd)
         except Exception:
             if temporary and temporary.exists():
                 temporary.unlink()
@@ -101,6 +142,112 @@ class PlanApprovalManager:
 
         if record.get("status") not in ("pending", "approved", "rejected"):
             raise PlanApprovalError("Invalid approval status.")
+
+        task_id = record.get("task_id")
+        if type(task_id) is not int or task_id < 1:
+            raise PlanApprovalError("Invalid plan task identity.")
+
+        reviewed_at = record.get("reviewed_at")
+        if reviewed_at is not None and not isinstance(reviewed_at, str):
+            raise PlanApprovalError("Invalid plan review timestamp.")
+        if record["status"] == "pending" and reviewed_at is not None:
+            raise PlanApprovalError("Pending plan has a review timestamp.")
+        plan_steps = plan.get("steps")
+        if not isinstance(plan_steps, list) or not plan_steps:
+            raise PlanApprovalError("Invalid saved plan steps.")
+        step_ids_list = []
+        for step in plan_steps:
+            if (
+                not isinstance(step, dict)
+                or isinstance(step.get("id"), bool)
+                or not isinstance(step.get("id"), int)
+                or step["id"] < 1
+            ):
+                raise PlanApprovalError("Invalid saved plan step identity.")
+            step_ids_list.append(step["id"])
+        if len(step_ids_list) != len(set(step_ids_list)):
+            raise PlanApprovalError("Duplicate saved plan step identity.")
+        step_ids = set(step_ids_list)
+
+        execution = record.get("execution")
+        if execution is not None:
+            if not isinstance(execution, dict):
+                raise PlanApprovalError("Invalid execution record.")
+
+            if execution.get("state") not in (
+                "claimed",
+                "completed",
+                "failed",
+                "interrupted",
+            ):
+                raise PlanApprovalError("Invalid execution state.")
+
+            started_at = execution.get("started_at")
+            finished_at = execution.get("finished_at")
+            if not isinstance(started_at, str) or not started_at:
+                raise PlanApprovalError("Invalid execution start timestamp.")
+            if finished_at is not None and not isinstance(finished_at, str):
+                raise PlanApprovalError("Invalid execution finish timestamp.")
+            if (
+                execution["state"] == "claimed"
+                and finished_at is not None
+            ):
+                raise PlanApprovalError("Claimed execution cannot be finished.")
+            if (
+                execution["state"] in ("completed", "failed", "interrupted")
+                and (
+                    not isinstance(finished_at, str)
+                    or not finished_at
+                )
+            ):
+                raise PlanApprovalError("Terminal execution is missing its finish timestamp.")
+
+            completed_steps = execution.get("completed_steps", [])
+            if not isinstance(completed_steps, list):
+                raise PlanApprovalError("Invalid completed-step checkpoint.")
+            if any(
+                isinstance(step_id, bool)
+                or not isinstance(step_id, int)
+                or step_id not in step_ids
+                for step_id in completed_steps
+            ):
+                raise PlanApprovalError("Invalid completed-step checkpoint.")
+            if len(completed_steps) != len(set(completed_steps)):
+                raise PlanApprovalError("Duplicate completed-step checkpoint.")
+
+            failed_step = execution.get("failed_step")
+            if (
+                failed_step is not None
+                and (
+                    isinstance(failed_step, bool)
+                    or not isinstance(failed_step, int)
+                    or failed_step not in step_ids
+                )
+            ):
+                raise PlanApprovalError("Invalid failed-step checkpoint.")
+
+            last_completed = execution.get("last_completed_step")
+            if (
+                last_completed is not None
+                and (
+                    isinstance(last_completed, bool)
+                    or not isinstance(last_completed, int)
+                    or last_completed not in completed_steps
+                )
+            ):
+                raise PlanApprovalError("Invalid last completed-step checkpoint.")
+
+            checkpoint_state = execution.get("last_checkpoint_state")
+            if checkpoint_state not in (None, "completed", "failed"):
+                raise PlanApprovalError("Invalid checkpoint state.")
+            checkpoint_at = execution.get("last_checkpoint_at")
+            if checkpoint_at is not None and not isinstance(checkpoint_at, str):
+                raise PlanApprovalError("Invalid checkpoint timestamp.")
+            error_type = execution.get("last_error_type")
+            if error_type is not None and (
+                not isinstance(error_type, str) or len(error_type) > 100
+            ):
+                raise PlanApprovalError("Invalid checkpoint error type.")
 
         return record
 
@@ -145,10 +292,11 @@ class PlanApprovalManager:
             "task_id": task_id,
             "plan_hash": record["plan_hash"],
         })
+        self._fsync_audit_log()
 
         return record
 
-    def _audit_contains_interruption_event(self, plan_id):
+    def _audit_contains_event(self, event_name, plan_id):
         path = self.audit.path
         if not path.exists():
             return False
@@ -174,7 +322,7 @@ class PlanApprovalManager:
 
                     details = event.get("details")
                     if (
-                        event.get("event") == "PLAN_EXECUTION_INTERRUPTED"
+                        event.get("event") == event_name
                         and isinstance(details, dict)
                         and details.get("plan_id") == plan_id
                     ):
@@ -185,6 +333,51 @@ class PlanApprovalManager:
             ) from None
 
         return found
+
+    def _completed_steps_from_audit(self, plan_id):
+        path = self.audit.path
+        if not path.exists():
+            return []
+        if not self.audit.verify():
+            raise PlanApprovalError("Audit log integrity check failed")
+
+        completed = []
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line_number, line in enumerate(handle, start=1):
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        raise PlanApprovalError(
+                            f"Audit log is unreadable at line {line_number}"
+                        ) from None
+
+                    if not isinstance(event, dict):
+                        raise PlanApprovalError(
+                            f"Audit record {line_number} is invalid"
+                        )
+                    details = event.get("details")
+                    if (
+                        event.get("event") != "PLAN_STEP_COMPLETED"
+                        or not isinstance(details, dict)
+                        or details.get("plan_id") != plan_id
+                    ):
+                        continue
+
+                    step_id = details.get("step_id")
+                    if (
+                        isinstance(step_id, int)
+                        and not isinstance(step_id, bool)
+                        and step_id > 0
+                        and step_id not in completed
+                    ):
+                        completed.append(step_id)
+        except OSError as error:
+            raise PlanApprovalError(
+                f"Audit log could not be read: {error}"
+            ) from None
+
+        return completed
 
     def mark_interrupted(self, plan_id, confirm_stopped=False):
         if confirm_stopped is not True:
@@ -246,19 +439,35 @@ class PlanApprovalManager:
         # Write the audit event first, then persist the terminal recovery
         # state. If the process stops between these operations, a retry sees
         # the existing event and completes the plan update without duplication.
-        if not self._audit_contains_interruption_event(plan_id):
+        if not self._audit_contains_event("PLAN_EXECUTION_INTERRUPTED", plan_id):
             self.audit.append("PLAN_EXECUTION_INTERRUPTED", {
                 "plan_id": plan_id,
                 "task_id": record["task_id"],
                 "plan_hash": record["plan_hash"],
                 "lock_retained": True,
             })
+        self._fsync_audit_log()
 
-        record["execution"] = {
+        interrupted_execution = (
+            dict(execution) if isinstance(execution, dict) else {}
+        )
+        completed_steps = interrupted_execution.get("completed_steps", [])
+        if not isinstance(completed_steps, list):
+            completed_steps = []
+        for step_id in self._completed_steps_from_audit(plan_id):
+            if step_id not in completed_steps:
+                completed_steps.append(step_id)
+        interrupted_execution["completed_steps"] = completed_steps
+        if completed_steps:
+            interrupted_execution["last_completed_step"] = completed_steps[-1]
+            interrupted_execution["last_checkpoint_state"] = "completed"
+
+        interrupted_execution.update({
             "state": "interrupted",
             "started_at": started_at,
             "finished_at": self._now(),
-        }
+        })
+        record["execution"] = interrupted_execution
 
         self._write(self._path(plan_id), record)
 
@@ -281,24 +490,30 @@ class PlanApprovalManager:
 
     def _decide(self, plan_id, decision):
         record = self._load(plan_id)
+        event_name = (
+            "PLAN_APPROVED" if decision == "approved" else "PLAN_REJECTED"
+        )
 
-        if record["status"] != "pending":
+        if record["status"] not in ("pending", decision):
             raise PlanApprovalError("Plan has already been reviewed.")
 
-        record["status"] = decision
-        record["reviewed_at"] = self._now()
+        # Persist review evidence first so a retry can complete the record
+        # transition without duplicating the approval/rejection event.
+        if not self._audit_contains_event(event_name, plan_id):
+            self.audit.append(
+                event_name,
+                {
+                    "plan_id": plan_id,
+                    "task_id": record["task_id"],
+                    "plan_hash": record["plan_hash"],
+                },
+            )
+        self._fsync_audit_log()
 
-        path = self._path(plan_id)
-        self._write(path, record)
-
-        self.audit.append(
-            "PLAN_APPROVED" if decision == "approved" else "PLAN_REJECTED",
-            {
-                "plan_id": plan_id,
-                "task_id": record["task_id"],
-                "plan_hash": record["plan_hash"],
-            },
-        )
+        if record["status"] == "pending":
+            record["status"] = decision
+            record["reviewed_at"] = self._now()
+            self._write(self._path(plan_id), record)
 
         return record
 

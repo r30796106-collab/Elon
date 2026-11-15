@@ -65,6 +65,52 @@ class PatchApprovalTests(unittest.TestCase):
         )
         self.assertTrue(self.engine.audit.verify())
 
+    def test_approval_retries_after_proposal_write_failure_without_duplicate_audit(self):
+        record = self.manager.save_proposal(
+            self.task_id,
+            self.make_patch(),
+        )
+        original_write = self.manager._write
+        failed = {"value": False}
+
+        def fail_write_once(path, value):
+            if not failed["value"]:
+                failed["value"] = True
+                raise OSError("simulated proposal persistence failure")
+            return original_write(path, value)
+
+        with patch.object(
+            self.manager,
+            "_write",
+            side_effect=fail_write_once,
+        ):
+            with self.assertRaisesRegex(
+                OSError,
+                "proposal persistence failure",
+            ):
+                self.manager.approve(record["proposal_id"])
+
+            self.assertEqual(
+                self.manager.get_proposal(record["proposal_id"])["status"],
+                "pending",
+            )
+            approved = self.manager.approve(record["proposal_id"])
+
+        self.assertEqual(approved["status"], "approved")
+        audit_lines = [
+            json.loads(line)
+            for line in (self.engine.logs / "audit.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        matching = [
+            item for item in audit_lines
+            if item.get("event") == "PATCH_PROPOSAL_APPROVED"
+            and item.get("details", {}).get("proposal_id") == record["proposal_id"]
+        ]
+        self.assertEqual(len(matching), 1)
+        self.assertTrue(self.engine.audit.verify())
+
     def test_cannot_decide_twice(self):
         record = self.manager.save_proposal(
             self.task_id, self.make_patch()

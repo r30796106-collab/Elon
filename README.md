@@ -1,5 +1,9 @@
 # ELON
 
+See [MILESTONES.md](MILESTONES.md) for the Phase 2 roadmap, current completion status, and acceptance evidence.
+See [RUNBOOK.md](RUNBOOK.md) for safe operation, approval, and crash-recovery procedures.
+See [SECURITY_REVIEW.md](SECURITY_REVIEW.md) for current controls, residual risks, and release blockers.
+
 ELON is a general-purpose developer-agent project. The V1 foundation prioritizes deterministic project inspection, task tracking, registered testing, controlled change workflows, crash recovery, and auditable operations.
 
 AI-provider integrations remain in the repository for a later, separate milestone. They are not required for the deterministic V1 diagnostic and safety workflows.
@@ -7,9 +11,16 @@ AI-provider integrations remain in the repository for a later, separate mileston
 ## V1 capabilities
 
 - Scan Python project modules and report syntax errors without executing scanned source files.
+- Include Python and JavaScript source in bounded task context; map JavaScript symbols/local imports and check syntax with Node.js parsing only. Scanned source is never executed.
 - Build project context and inspect approved workspace files through a registered tool interface.
 - Run only explicitly registered test suites.
 - Track development tasks and their lifecycle.
+- Inspect Git branch, working-tree changes, diffs, and recent commits without modifying the repository.
+- Accept manually authored multi-file JSON patch proposals without an AI provider; apply only after explicit approval.
+- Generate minimal Python or JavaScript project scaffolds from requirements inside `workspace/generated_projects`, with explicit approval, no-overwrite guarantees, and crash recovery.
+- Inspect Python/Node runtimes and declared dependencies without installing packages or using the network.
+- Measure read-only project scan, JavaScript scan, health-check, and context-build performance baselines.
+- Generate bounded, deterministic read-only plans without an external AI provider.
 - Prepare and review controlled patch proposals; applying changes is a separate approval-gated action.
 - Keep backups and transaction journals for patch operations.
 - Recover interrupted patch transactions and deliver recovery audit events through a durable outbox.
@@ -23,6 +34,7 @@ Run commands from the repository root:
 ```bash
 python main.py create "Inspect project health" --description "Run diagnostics and review failures."
 python main.py list
+python main.py plan 1
 python main.py diagnose
 python main.py health
 python main.py audit
@@ -40,6 +52,28 @@ Run diagnostics with the full registered test suite:
 python main.py diagnose --tests --test full
 ```
 
+Measure read-only performance baselines:
+
+```bash
+python main.py benchmark --iterations 3
+```
+
+The benchmark reports timing only; it does not modify project files or apply optimizations.
+
+Inspect runtime and dependency state without installing anything:
+
+```bash
+python main.py environment
+```
+
+Inspect Git state without changing it:
+
+```bash
+python main.py git status
+python main.py git diff
+python main.py git log --limit 10
+```
+
 Inspect the registered tools and workspace:
 
 ```bash
@@ -47,7 +81,22 @@ python main.py tools registry
 python main.py tools list
 ```
 
+The `plan` command builds a deterministic, read-only inspection/analysis/test plan and submits it for explicit review. It does not call Gemini or another AI provider. Plan execution still requires approval and never modifies source files.
+
+The `diagnose` command also checks JavaScript syntax when Node.js is available. It uses `node --check` only and never runs the scanned JavaScript source. If Node.js is unavailable while JavaScript files are present, the report warns and skips JavaScript syntax checks.
+
 The `health` command is read-only. It checks required directories, SQLite integrity, the audit hash chain, and patch/proposal consistency. It does not perform recovery or call AI providers.
+
+## Deterministic plan workflow
+
+1. Create a task and note its task ID.
+2. Generate a deterministic, read-only plan: `python main.py plan TASK_ID`.
+3. Review the saved plan with `python main.py plans`.
+4. Approve the exact plan ID: `python main.py plan-approve PLAN_ID`.
+5. Execute the approved read-only plan: `python main.py execute-plan PLAN_ID`.
+6. Inspect durable step checkpoints: `python main.py plan-progress PLAN_ID`.
+
+Plan execution is bounded to inspection, analysis, and registered tests. It cannot modify project files. A separate controlled patch proposal and approval workflow is required for source changes.
 
 ## Controlled patch workflow
 
@@ -85,7 +134,7 @@ Plan recovery marks the execution interrupted and retains its lock. Automatic re
 
 ## Verification
 
-GitHub Actions runs Python compilation and the complete unittest suite on pushes and pull requests using Python 3.12.
+GitHub Actions runs Python compilation and the complete unittest suite on pushes and pull requests using Python 3.12 and Python 3.14.
 
 Run the same checks locally with:
 

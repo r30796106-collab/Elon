@@ -101,6 +101,61 @@ class ElonCoreTests(unittest.TestCase):
         self.engine.create_task("Audit test")
         self.assertTrue(self.engine.audit_valid())
 
+    def test_task_created_audit_outbox_recovers_after_append_failure(self):
+        import json
+
+        original_append = self.engine.audit.append
+        def fail_created(event, details):
+            if event == "TASK_CREATED":
+                raise OSError("simulated task-created audit failure")
+            return original_append(event, details)
+
+        self.engine.audit.append = fail_created
+        with self.assertRaises(OSError):
+            self.engine.create_task("Durable create")
+
+        task_id = self.engine.list_tasks()[0]["id"]
+        with self.engine._connect() as db:
+            pending = db.execute(
+                "SELECT COUNT(*) FROM task_lifecycle_audit_outbox WHERE delivered_at IS NULL"
+            ).fetchone()[0]
+        self.assertEqual(pending, 1)
+
+        recovered = TaskEngine(self.root)
+        records = [json.loads(line) for line in recovered.audit.path.read_text().splitlines()]
+        created = [r for r in records if r.get("event") == "TASK_CREATED" and r.get("details", {}).get("task_lifecycle_event_id")]
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0]["details"]["task_id"], task_id)
+        self.assertTrue(recovered.audit_valid())
+
+    def test_task_completed_audit_outbox_recovers_after_append_failure(self):
+        import json
+
+        task_id = self.engine.create_task("Durable completion")
+        original_append = self.engine.audit.append
+        def fail_completed(event, details):
+            if event == "TASK_COMPLETED":
+                raise OSError("simulated task-completed audit failure")
+            return original_append(event, details)
+
+        self.engine.audit.append = fail_completed
+        with self.assertRaises(OSError):
+            self.engine.complete_task(task_id)
+
+        self.assertEqual(self.engine.get_task(task_id)["status"], "completed")
+        with self.engine._connect() as db:
+            pending = db.execute(
+                "SELECT COUNT(*) FROM task_lifecycle_audit_outbox WHERE delivered_at IS NULL"
+            ).fetchone()[0]
+        self.assertEqual(pending, 1)
+
+        recovered = TaskEngine(self.root)
+        records = [json.loads(line) for line in recovered.audit.path.read_text().splitlines()]
+        completed = [r for r in records if r.get("event") == "TASK_COMPLETED" and r.get("details", {}).get("task_lifecycle_event_id")]
+        self.assertEqual(len(completed), 1)
+        self.assertEqual(completed[0]["details"]["task_id"], task_id)
+        self.assertEqual(recovered.get_task(task_id)["status"], "completed")
+        self.assertTrue(recovered.audit_valid())
     def test_task_status_rejects_unknown_value(self):
         task_id = self.engine.create_task("Status validation")
 
@@ -137,6 +192,98 @@ class ElonCoreTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "in_progress")
 
+
+    def test_concurrent_terminal_updates_cannot_overwrite_each_other(self):
+        import threading
+
+        task_id = self.engine.create_task("Concurrent terminal update")
+        barrier = threading.Barrier(2)
+        outcomes = []
+        outcome_lock = threading.Lock()
+
+        def update(status):
+            barrier.wait(timeout=3)
+            try:
+                self.engine.update_task_status(task_id, status)
+                result = (status, True)
+            except ValueError:
+                result = (status, False)
+            with outcome_lock:
+                outcomes.append(result)
+
+        threads = [
+            threading.Thread(target=update, args=("completed",)),
+            threading.Thread(target=update, args=("cancelled",)),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+
+        self.assertEqual(sum(success for _, success in outcomes), 1)
+        final_status = self.engine.get_task(task_id)["status"]
+        self.assertIn(final_status, ("completed", "cancelled"))
+        self.assertEqual(
+            final_status,
+            next(status for status, success in outcomes if success),
+        )
+
+    def test_task_status_audit_outbox_recovers_after_append_failure(self):
+        import json
+
+        task_id = self.engine.create_task("Audit outbox recovery")
+        original_append = self.engine.audit.append
+
+        def fail_append(event, details):
+            if event == "TASK_STATUS_UPDATED":
+                raise OSError("simulated audit disk failure")
+            return original_append(event, details)
+
+        self.engine.audit.append = fail_append
+        with self.assertRaises(OSError):
+            self.engine.update_task_status(task_id, "in_progress")
+
+        # The status and its outbox event commit together even when delivery
+        # fails. A fresh engine retries delivery during initialization.
+        self.assertEqual(
+            self.engine.get_task(task_id)["status"], "in_progress"
+        )
+        pending = self.engine._connect()
+        with pending as db:
+            count = db.execute(
+                """SELECT COUNT(*) FROM task_status_audit_outbox
+                WHERE task_id = ? AND delivered_at IS NULL""",
+                (task_id,),
+            ).fetchone()[0]
+        self.assertEqual(count, 1)
+
+        recovered = TaskEngine(self.root)
+        recovered_again = TaskEngine(self.root)
+        self.assertEqual(
+            recovered.get_task(task_id)["status"], "in_progress"
+        )
+
+        records = [
+            json.loads(line)
+            for line in recovered.audit.path.read_text().splitlines()
+            if line.strip()
+        ]
+        status_events = [
+            record for record in records
+            if record.get("event") == "TASK_STATUS_UPDATED"
+            and record.get("details", {}).get("task_status_event_id")
+        ]
+        self.assertEqual(len(status_events), 1)
+        self.assertTrue(recovered.audit_valid())
+
+        with recovered_again._connect() as db:
+            pending_count = db.execute(
+                """SELECT COUNT(*) FROM task_status_audit_outbox
+                WHERE task_id = ? AND delivered_at IS NULL""",
+                (task_id,),
+            ).fetchone()[0]
+        self.assertEqual(pending_count, 0)
 
     def test_unregistered_test_blocked(self):
         with self.assertRaises(PolicyError):

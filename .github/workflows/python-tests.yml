@@ -14,14 +14,20 @@ permissions:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.14"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Compile Python sources
         run: python -m compileall -q .
       - name: Run full unittest suite
         run: python -m unittest discover -s tests -v
+      - name: Benchmark read-only project workflows
+        run: python main.py benchmark --iterations 3

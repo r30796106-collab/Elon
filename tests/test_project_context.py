@@ -1,8 +1,10 @@
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 from engine.project_context import ProjectContextBuilder
+from engine.javascript_intelligence import JavaScriptScanner
 
 
 class TestProjectContextBuilder(unittest.TestCase):
@@ -149,6 +151,53 @@ class TestProjectContextBuilder(unittest.TestCase):
         self.assertIn(
             "tests.test_calculator_validation",
             result["tests"],
+        )
+
+    def test_javascript_project_files_and_local_imports_enter_context(self):
+        if not shutil.which("node"):
+            self.skipTest("Node.js is not installed")
+
+        src = self.root / "src"
+        src.mkdir()
+        (src / "helper.mjs").write_text(
+            "export function normalizeProject(value) {\n"
+            "    return value.trim();\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (src / "main.mjs").write_text(
+            'import { normalizeProject } from "./helper.mjs";\n'
+            "export function buildProject(name) {\n"
+            "    return normalizeProject(name);\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        test_dir = self.root / "test"
+        test_dir.mkdir()
+        (test_dir / "test_project.mjs").write_text(
+            'import { buildProject } from "../src/main.mjs";\n'
+            'export function testBuildProject() { return buildProject("ELON"); }\n',
+            encoding="utf-8",
+        )
+
+        javascript_report = JavaScriptScanner(self.root).scan()
+        self.assertIn("src/main", javascript_report["modules"])
+        self.assertIn("src/helper", javascript_report["modules"])
+
+        result = self.builder.build("build project normalize")
+
+        selected = {item["path"]: item for item in result["files"]}
+        self.assertIn("src/main.mjs", selected)
+        self.assertIn("src/helper.mjs", selected)
+        self.assertIn("test/test_project.mjs", selected)
+        self.assertIn(
+            "src/helper",
+            result["impact"]["src/main"]["dependencies"],
+        )
+        self.assertIn("test/test_project", result["tests"])
+        self.assertIn(
+            "buildProject",
+            {item["name"] for item in selected["src/main.mjs"]["symbols"]},
         )
 
     def test_unrelated_infrastructure_test_is_not_selected(self):

@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 
 from engine.task_engine import TaskEngine
@@ -13,9 +14,14 @@ from engine.tool_registry import ToolRegistry
 from engine.local_bridge import LocalBridgeServer
 from engine.ai_tool_controller import AIToolController
 from engine.ai_tool_orchestrator import AIToolOrchestrator
-from engine.ai_task_planner import AITaskPlanner
 from engine.plan_approval import PlanApprovalManager
 from engine.plan_executor import PlanExecutor
+from engine.deterministic_planner import DeterministicTaskPlanner
+from engine.git_manager import GitManager
+from engine.environment_inspector import EnvironmentInspector
+from engine.performance_profiler import PerformanceProfiler
+from engine.project_scaffolder import ProjectScaffolder
+from engine.worker_coordinator import WorkerCoordinator
 from engine.patch_approval import PatchApprovalManager
 from engine.patch_transaction import PatchTransaction
 from engine.patch_proposal_service import PatchProposalService
@@ -60,6 +66,8 @@ def main():
     aider.add_argument("--test", choices=("core", "full"), default="core")
 
     sub.add_parser("patches")
+    patch_json = sub.add_parser("patch-propose-json")
+    patch_json.add_argument("json_path")
     patch_show = sub.add_parser("patch-show")
     patch_show.add_argument("proposal_id")
     patch_approve = sub.add_parser("patch-approve")
@@ -84,7 +92,56 @@ def main():
     sub.add_parser("test")
     sub.add_parser("audit")
     sub.add_parser("status")
+    git_command = sub.add_parser("git")
+    git_sub = git_command.add_subparsers(
+        dest="git_action",
+        required=True,
+    )
+    git_sub.add_parser("status")
+    git_diff = git_sub.add_parser("diff")
+    git_diff.add_argument("--staged", action="store_true")
+    git_diff.add_argument("--full", action="store_true")
+    git_log = git_sub.add_parser("log")
+    git_log.add_argument("--limit", type=int, default=10)
     sub.add_parser("usage")
+    sub.add_parser("environment")
+    benchmark = sub.add_parser("benchmark")
+    benchmark.add_argument("--iterations", type=int, default=3)
+    scaffold_propose = sub.add_parser("scaffold-propose")
+    scaffold_propose.add_argument("project_name")
+    scaffold_propose.add_argument(
+        "--language",
+        choices=("python", "javascript"),
+        default="python",
+    )
+    scaffold_propose.add_argument("--description", required=True)
+    scaffold_propose.add_argument("--requirements", required=True)
+    sub.add_parser("scaffold-list")
+    scaffold_approve = sub.add_parser("scaffold-approve")
+    scaffold_approve.add_argument("proposal_id")
+    scaffold_apply = sub.add_parser("scaffold-apply")
+    scaffold_apply.add_argument("proposal_id")
+    scaffold_verify = sub.add_parser("scaffold-verify")
+    scaffold_verify.add_argument("proposal_id")
+    scaffold_recover = sub.add_parser("scaffold-recover")
+    scaffold_recover.add_argument("proposal_id")
+    scaffold_recover.add_argument("--confirm-stopped", action="store_true")
+    sub.add_parser("worker-queue")
+    worker_claim = sub.add_parser("worker-claim")
+    worker_claim.add_argument("worker_id")
+    worker_claim.add_argument("--lease-seconds", type=int, default=300)
+    worker_heartbeat = sub.add_parser("worker-heartbeat")
+    worker_heartbeat.add_argument("task_id", type=int)
+    worker_heartbeat.add_argument("worker_id")
+    worker_heartbeat.add_argument("lease_token")
+    worker_heartbeat.add_argument("--lease-seconds", type=int, default=300)
+    worker_release = sub.add_parser("worker-release")
+    worker_release.add_argument("task_id", type=int)
+    worker_release.add_argument("worker_id")
+    worker_release.add_argument("lease_token")
+    worker_recover = sub.add_parser("worker-recover")
+    worker_recover.add_argument("task_id", type=int)
+    worker_recover.add_argument("--confirm-stopped", action="store_true")
     sub.add_parser("health")
 
     diagnose_command = sub.add_parser("diagnose")
@@ -98,6 +155,8 @@ def main():
     plan_command.add_argument("task_id", type=int)
 
     sub.add_parser("plans")
+    plan_progress = sub.add_parser("plan-progress")
+    plan_progress.add_argument("plan_id")
 
     approve_command = sub.add_parser("plan-approve")
     approve_command.add_argument("plan_id")
@@ -176,7 +235,20 @@ def main():
                 location = error["path"]
                 if error.get("line") is not None:
                     location += f":{error['line']}"
-                print("SYNTAX:", location, "-", error["message"])
+                print("PYTHON SYNTAX:", location, "-", error["message"])
+
+            javascript = scan["javascript"]
+            print(
+                "JavaScript files scanned:",
+                javascript.get("files_scanned", 0),
+            )
+            for error in scan["javascript_syntax_errors"]:
+                print(
+                    "JAVASCRIPT SYNTAX:",
+                    error.get("path", "unknown"),
+                    "-",
+                    error.get("message", "unknown error"),
+                )
 
             for name, check in report["health"]["checks"].items():
                 print(f"HEALTH {name.upper()}: {check['status']} - {check['message']}")
@@ -272,6 +344,65 @@ def main():
             print("Original source changes: NOT performed")
             if not result["success"]:
                 raise SystemExit(2)
+
+        elif args.command == "patch-propose-json":
+            relative = Path(args.json_path)
+            if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+                raise ValueError("Proposal JSON must be a safe relative workspace path")
+            if relative.parts[0] != "workspace" or relative.suffix.lower() != ".json":
+                raise ValueError("Proposal JSON must be a .json file inside workspace/")
+            proposal_candidate = ROOT / relative
+            if proposal_candidate.is_symlink():
+                raise ValueError("Proposal JSON must not be a symlink")
+            proposal_path = proposal_candidate.resolve(strict=True)
+            workspace_root = (ROOT / "workspace").resolve()
+            proposal_path.relative_to(workspace_root)
+            if not proposal_path.is_file():
+                raise ValueError("Proposal JSON must be a regular file")
+            if proposal_path.stat().st_size > 16 * 1024 * 1024:
+                raise ValueError("Proposal JSON exceeds the 16 MiB limit")
+
+            proposal_data = json.loads(
+                proposal_path.read_text(encoding="utf-8")
+            )
+            if not isinstance(proposal_data, dict) or set(proposal_data) != {
+                "task_id", "summary", "test_name", "patches"
+            }:
+                raise ValueError("Invalid manual patch proposal schema")
+            if type(proposal_data["task_id"]) is not int or proposal_data["task_id"] < 1:
+                raise ValueError("Invalid task ID")
+            if not isinstance(proposal_data["summary"], str):
+                raise ValueError("Proposal summary must be text")
+            if not isinstance(proposal_data["test_name"], str):
+                raise ValueError("Test suite name must be text")
+            if not isinstance(proposal_data["patches"], list) or not (
+                1 <= len(proposal_data["patches"]) <= 8
+            ):
+                raise ValueError("Proposal must contain 1 to 8 file patches")
+
+            for patch in proposal_data["patches"]:
+                if not isinstance(patch, dict) or set(patch) != {
+                    "path", "expected_sha256", "content"
+                }:
+                    raise ValueError("Invalid manual patch entry")
+                if not isinstance(patch["expected_sha256"], str) or not re.fullmatch(
+                    r"[0-9a-f]{64}", patch["expected_sha256"]
+                ):
+                    raise ValueError("Invalid expected SHA-256 hash")
+
+            manager = PatchApprovalManager(engine)
+            saved = manager.save_proposal(
+                proposal_data["task_id"],
+                proposal_data["patches"],
+                summary=proposal_data["summary"],
+                test_name=proposal_data["test_name"],
+            )
+            print("MANUAL PATCH PROPOSAL SAVED")
+            print("AI provider calls: DISABLED")
+            print("Proposal ID:", saved["proposal_id"])
+            print("Status:", saved["status"])
+            print("Files:", len(saved["patches"]))
+            print("Source changes: NOT performed")
 
         elif args.command == "patches":
             manager = PatchApprovalManager(engine)
@@ -457,11 +588,9 @@ def main():
             if task is None:
                 raise ValueError("Task does not exist")
 
-            provider = OpenAIProvider()
-            if not provider.configured():
-                raise RuntimeError("Gemini API key is not configured")
-
-            planner = AITaskPlanner(ROOT, provider)
+            # Deterministic planning is available without Gemini, Aider,
+            # OpenRouter, or any other external AI provider.
+            planner = DeterministicTaskPlanner(ROOT)
             result = planner.plan({
                 "title": task["title"],
                 "description": task["description"],
@@ -470,7 +599,8 @@ def main():
             manager = PlanApprovalManager(ROOT)
             saved = manager.save_plan(args.task_id, result)
 
-            print("PLAN SUBMITTED FOR REVIEW")
+            print("DETERMINISTIC PLAN SUBMITTED FOR REVIEW")
+            print("AI provider calls: DISABLED")
             print("Plan ID:", saved["plan_id"])
             print("Status:", saved["status"])
             print("Plan hash:", saved["plan_hash"])
@@ -481,6 +611,32 @@ def main():
             manager = PlanApprovalManager(ROOT)
             records = manager.list_plans()
             print(json.dumps(records, ensure_ascii=False, indent=2))
+
+        elif args.command == "plan-progress":
+            manager = PlanApprovalManager(ROOT)
+            record = manager.get_plan(args.plan_id)
+            execution = record.get("execution") or {}
+            completed_steps = execution.get("completed_steps", [])
+            total_steps = len(record["plan"]["steps"])
+            progress_percent = (
+                round(len(completed_steps) * 100 / total_steps, 1)
+                if total_steps else 0
+            )
+            print(json.dumps({
+                "plan_id": record["plan_id"],
+                "task_id": record["task_id"],
+                "status": record["status"],
+                "progress": {
+                    "completed_steps": len(completed_steps),
+                    "total_steps": total_steps,
+                    "percent": progress_percent,
+                    "failed_step": execution.get("failed_step"),
+                    "last_checkpoint_state": execution.get(
+                        "last_checkpoint_state"
+                    ),
+                },
+                "execution": execution,
+            }, ensure_ascii=False, indent=2))
 
         elif args.command == "approve":
             manager = PlanApprovalManager(ROOT)
@@ -542,8 +698,113 @@ def main():
             print("Replay: BLOCKED (lock retained)")
             print("Automatic resume: DISABLED")
 
+        elif args.command == "worker-queue":
+            coordinator = WorkerCoordinator(ROOT)
+            print(json.dumps(coordinator.list_leases(), ensure_ascii=False, indent=2))
+            print("Plan execution: NOT started by worker coordination.")
+
+        elif args.command == "worker-claim":
+            coordinator = WorkerCoordinator(ROOT)
+            claim = coordinator.claim_next(args.worker_id, args.lease_seconds)
+            if claim is None:
+                print("NO UNCLAIMED PENDING TASK")
+            else:
+                print("WORKER LEASE CLAIMED; PLAN EXECUTION: NOT STARTED")
+                print(json.dumps(claim, ensure_ascii=False, indent=2))
+
+        elif args.command == "worker-heartbeat":
+            coordinator = WorkerCoordinator(ROOT)
+            result = coordinator.heartbeat(
+                args.task_id, args.worker_id, args.lease_token, args.lease_seconds
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+
+        elif args.command == "worker-release":
+            coordinator = WorkerCoordinator(ROOT)
+            result = coordinator.release(
+                args.task_id, args.worker_id, args.lease_token
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+
+        elif args.command == "worker-recover":
+            coordinator = WorkerCoordinator(ROOT)
+            result = coordinator.recover_expired(
+                args.task_id, confirm_stopped=args.confirm_stopped
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        elif args.command == "git":
+            manager = GitManager(ROOT)
+            if args.git_action == "status":
+                result = manager.status()
+            elif args.git_action == "diff":
+                result = manager.diff(
+                    staged=args.staged,
+                    stat_only=not args.full,
+                )
+            elif args.git_action == "log":
+                result = manager.log(limit=args.limit)
+            else:
+                raise ValueError("Unsupported Git action")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+
         elif args.command == "usage":
             print(UsageTracker().report())
+
+        elif args.command == "environment":
+            report = EnvironmentInspector(ROOT).inspect()
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+
+        elif args.command == "benchmark":
+            report = PerformanceProfiler(ROOT).benchmark(
+                iterations=args.iterations,
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+
+        elif args.command == "scaffold-propose":
+            record = ProjectScaffolder(ROOT).propose_template(
+                args.project_name,
+                language=args.language,
+                description=args.description,
+                requirements=args.requirements,
+            )
+            print("PROJECT SCAFFOLD PROPOSAL SAVED")
+            print("AI provider calls: DISABLED")
+            print("Proposal ID:", record["proposal_id"])
+            print("Status:", record["status"])
+            print("Target:", record["target"])
+            print("Files:", len(record["files"]))
+            print("Source project changes: NOT performed")
+
+        elif args.command == "scaffold-list":
+            records = ProjectScaffolder(ROOT).list_proposals()
+            print(json.dumps(records, ensure_ascii=False, indent=2))
+
+        elif args.command == "scaffold-approve":
+            record = ProjectScaffolder(ROOT).approve(args.proposal_id)
+            print("SCAFFOLD APPROVED")
+            print("Proposal ID:", record["proposal_id"])
+            print("Status:", record["status"])
+
+        elif args.command == "scaffold-apply":
+            record = ProjectScaffolder(ROOT).apply(args.proposal_id)
+            print("SCAFFOLD APPLIED")
+            print("Proposal ID:", record["proposal_id"])
+            print("Status:", record["status"])
+            print("Generated path:", record["target"])
+
+        elif args.command == "scaffold-verify":
+            report = ProjectScaffolder(ROOT).verify(args.proposal_id)
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+
+        elif args.command == "scaffold-recover":
+            record = ProjectScaffolder(ROOT).recover(
+                args.proposal_id,
+                confirm_stopped=args.confirm_stopped,
+            )
+            print("SCAFFOLD RECOVERY COMPLETE")
+            print("Proposal ID:", record["proposal_id"])
+            print("Status:", record["status"])
+            print("Generated path:", record["target"])
 
         elif args.command == "status":
             provider = OpenAIProvider()
