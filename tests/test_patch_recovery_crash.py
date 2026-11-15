@@ -20,8 +20,8 @@ class RecoveryProcessCrashTests(unittest.TestCase):
         engine = TaskEngine(root)
         transaction = PatchTransaction(engine)
         target = engine.workspace / "a.py"
-        old_data = b"value = 10\\n"
-        new_data = b"value = 100\\n"
+        old_data = b"value = 10"
+        new_data = b"value = 100"
         target.write_bytes(new_data)
         task_id = engine.create_task("Recovery audit outbox crash test")
         transaction_id = uuid.uuid4().hex
@@ -167,7 +167,6 @@ transaction.recover(transaction_id, confirm_stopped=True)
             self._assert_one_recovery_audit_event(
                 restarted_engine, transaction_id
             )
-
 
     def test_restart_after_crash_during_recovery(self):
         with tempfile.TemporaryDirectory() as temp:
