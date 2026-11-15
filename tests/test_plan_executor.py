@@ -307,6 +307,28 @@ class TestPlanExecutor(unittest.TestCase):
         self.assertNotIn("PLAN_EXECUTION_FINISHED", audit_text)
         self.assertTrue(self.engine.audit.verify())
 
+        # Cross-component recovery: after confirming the original executor
+        # process is stopped, PlanApprovalManager can safely mark the durable
+        # claim interrupted without replaying any plan step.
+        recovered = self.manager.mark_interrupted(
+            record["plan_id"],
+            confirm_stopped=True,
+        )
+        self.assertEqual(recovered["execution"]["state"], "interrupted")
+        self.assertTrue(self.lock_path(record["plan_id"]).exists())
+        self.assertEqual(
+            self.engine.get_task(self.task_id)["status"],
+            "pending",
+        )
+        audit_text = (self.root / "logs" / "audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(
+            audit_text.count("PLAN_EXECUTION_INTERRUPTED"),
+            1,
+        )
+        self.assertTrue(self.engine.audit.verify())
+
     def test_finished_audit_event_retries_without_replaying_steps(self):
         record = self.save_approved()
         original_append = self.engine.audit.append
