@@ -273,11 +273,10 @@ class TestPlanExecutor(unittest.TestCase):
             self.engine.get_task(self.task_id)["status"],
             "completed",
         )
-        events = [
-            item["event"]
-            for item in self.engine.audit.read_all()
-        ]
-        self.assertIn("PLAN_TASK_STATUS_RECONCILED", events)
+        audit_text = (self.root / "logs" / "audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("PLAN_TASK_STATUS_RECONCILED", audit_text)
         self.assertTrue(self.engine.audit.verify())
 
     def test_unapproved_plan_cannot_execute(self):
