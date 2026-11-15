@@ -120,6 +120,8 @@ def main():
     scaffold_approve.add_argument("proposal_id")
     scaffold_apply = sub.add_parser("scaffold-apply")
     scaffold_apply.add_argument("proposal_id")
+    scaffold_verify = sub.add_parser("scaffold-verify")
+    scaffold_verify.add_argument("proposal_id")
     scaffold_recover = sub.add_parser("scaffold-recover")
     scaffold_recover.add_argument("proposal_id")
     scaffold_recover.add_argument("--confirm-stopped", action="store_true")
@@ -738,6 +740,10 @@ def main():
             print("Proposal ID:", record["proposal_id"])
             print("Status:", record["status"])
             print("Generated path:", record["target"])
+
+        elif args.command == "scaffold-verify":
+            report = ProjectScaffolder(ROOT).verify(args.proposal_id)
+            print(json.dumps(report, ensure_ascii=False, indent=2))
 
         elif args.command == "scaffold-recover":
             record = ProjectScaffolder(ROOT).recover(
