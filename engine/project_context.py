@@ -209,7 +209,7 @@ class ProjectContextBuilder:
 
     def _term_set(self, text):
         # Split snake_case and CamelCase identifiers for task matching.
-        text = re.sub(r"([a-z0-9])([A-Z])", r"\\1 \\2", text)
+        text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)
         text = text.replace("_", " ")
         words = re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", text.lower())
         return {self._normalize_term(word) for word in words}
