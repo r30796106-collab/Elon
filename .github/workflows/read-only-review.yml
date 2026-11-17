@@ -1,0 +1,46 @@
+name: Blue Ant read-only review
+
+on:
+  pull_request:
+    branches: ["master"]
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Blue Ant read-only reviewers
+        uses: actions/checkout@v4
+        with:
+          repository: r30796106-collab/Blue-ant
+          ref: main
+          path: blue-ant
+          persist-credentials: false
+      - name: Checkout ELON pull request source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: target
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run four fixed read-only specialists
+        env:
+          PYTHONPATH: blue-ant/src
+        run: |
+          mkdir -p artifacts
+          python -m blue_ant.subbot_report --repo target --output artifacts/read-only-review.json
+          cat artifacts/read-only-review.json
+      - name: Upload read-only review report
+        uses: actions/upload-artifact@v4
+        with:
+          name: elon-read-only-review-report
+          path: artifacts/read-only-review.json
+          if-no-files-found: error
+          retention-days: 7
